@@ -1,0 +1,12 @@
+INFO:     Started server process [17348]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:52774 - "GET /symbols HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52775 - "GET /candles/EURUSD?count=5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34130 - "GET /analysis/EURUSD HTTP/1.1" 200 OK
+INFO:     127.0.0.1:1703 - "GET /backtest/EURUSD HTTP/1.1" 200 OK
+INFO:     127.0.0.1:28246 - "GET /signals/today HTTP/1.1" 200 OK
+INFO:     127.0.0.1:28247 - "POST /signals/run-now HTTP/1.1" 200 OK
+INFO:     127.0.0.1:28248 - "GET /signals/history HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35762 - "GET /symbols HTTP/1.1" 200 OK
