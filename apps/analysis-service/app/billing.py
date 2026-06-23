@@ -38,6 +38,7 @@ PLANS = {
             "export": False,
             "watchlist_limit": 1,
             "api_access": False,
+            "auto_trade": False,
         },
     },
     "pro": {
@@ -64,6 +65,7 @@ PLANS = {
             "export": True,
             "watchlist_limit": None,
             "api_access": False,
+            "auto_trade": False,
         },
     },
     "ultimate": {
@@ -80,6 +82,7 @@ PLANS = {
             "Premium multi-timeframe signals",
             "High-confidence (80%+ backtested) highlights",
             "6-strategy consensus + news filtering",
+            "Automated bot — connect a demo account for live execution",
             "Full backtest history per rule",
         ],
         "capabilities": {
@@ -91,6 +94,7 @@ PLANS = {
             "export": True,
             "watchlist_limit": None,
             "api_access": False,
+            "auto_trade": True,
         },
     },
     "platinum": {
@@ -103,6 +107,7 @@ PLANS = {
         "features": [
             "Everything in Ultimate, plus:",
             "Unlimited signals, all markets, priority scans",
+            "Automated paper-trading bot — unlimited positions",
             "Programmatic API access to signals & exports",
             "Early access to new strategies",
             "Priority support",
@@ -116,6 +121,7 @@ PLANS = {
             "export": True,
             "watchlist_limit": None,
             "api_access": True,
+            "auto_trade": True,
         },
     },
 }

@@ -53,6 +53,49 @@ CREATE TABLE IF NOT EXISTS signals (
     risk_reward REAL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Per-user config for the automated PAPER-trading bot (no real money/orders).
+CREATE TABLE IF NOT EXISTS auto_trade_settings (
+    user_id INTEGER PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    max_open INTEGER NOT NULL DEFAULT 5,
+    only_high_confidence INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Simulated positions opened automatically from signals. Purely hypothetical.
+CREATE TABLE IF NOT EXISTS auto_trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    signal_id INTEGER,
+    symbol TEXT NOT NULL,
+    interval TEXT,
+    direction TEXT NOT NULL,
+    entry REAL NOT NULL,
+    stop_loss REAL NOT NULL,
+    take_profit REAL NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',     -- open | closed
+    outcome TEXT,                            -- win | loss | open
+    exit_price REAL,
+    pnl_pct REAL,
+    venue TEXT NOT NULL DEFAULT 'simulated', -- simulated | demo | live-pending
+    broker_ref TEXT,                         -- broker order id when executed on a demo account
+    opened_at TEXT NOT NULL DEFAULT (datetime('now')),
+    closed_at TEXT
+);
+
+-- A user's connected brokerage. Demo accounts get authentic auto-execution;
+-- live accounts are accepted only with an explicit risk waiver and NEVER get
+-- autonomous real-money execution (orders require manual per-trade confirmation).
+CREATE TABLE IF NOT EXISTS broker_connections (
+    user_id INTEGER PRIMARY KEY,
+    provider TEXT NOT NULL DEFAULT 'simulated',  -- simulated | oanda
+    mode TEXT NOT NULL DEFAULT 'demo',           -- demo | live
+    account_id TEXT,
+    token TEXT,
+    risk_acknowledged INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
