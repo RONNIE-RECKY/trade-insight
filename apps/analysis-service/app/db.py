@@ -1,8 +1,11 @@
+import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parents[3] / "data" / "trade_insight.db"
+# DB location. Override with DB_PATH in production (e.g. on Railway set
+# DB_PATH=/app/data/trade_insight.db and mount a volume at /app/data).
+DB_PATH = Path(os.environ.get("DB_PATH") or (Path(__file__).resolve().parents[3] / "data" / "trade_insight.db"))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
