@@ -152,5 +152,52 @@ This is the fastest reliable path. ~30–45 minutes.
 5. Nginx reverse-proxies `yourdomain.com` → Next (3000) and `api.yourdomain.com` → uvicorn (8000). Add SSL with `certbot`.
 6. Set the same env vars as above.
 
+## 7. Host everything on Railway (one project)
+
+Railway can run the **entire app** — backend, frontend, and database — in a single
+project as three components. ~20–30 minutes.
+
+### 1. Create the project + database
+1. railway.app → **New Project → Deploy from GitHub repo** (connect the repo).
+2. In the project, **+ New → Database → PostgreSQL**. Railway provisions it and
+   exposes `DATABASE_URL` (and private-network vars) to the project.
+
+### 2. Backend service (FastAPI)
+1. **+ New → GitHub Repo** → pick the repo → name it `api`.
+2. Service **Settings → Root Directory:** `apps/analysis-service`.
+   (Railway's Nixpacks auto-detects Python from `requirements.txt`.)
+3. **Settings → Deploy → Start Command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+4. **Variables:**
+   - `ADMIN_EMAIL`, `ADMIN_PASSWORD` (your admin login)
+   - `ALLOWED_ORIGINS` = your frontend URL (fill after step 3, then redeploy)
+   - optional: `TWELVE_DATA_API_KEY`, `FINNHUB_API_KEY`, `RESEND_API_KEY`
+5. **Settings → Networking → Generate Domain.** Copy the URL (e.g. `https://api-production.up.railway.app`).
+6. Open `https://<that-url>/symbols` to confirm JSON.
+
+### 3. Frontend service (Next.js)
+1. **+ New → GitHub Repo** → same repo → name it `web`.
+2. **Root Directory:** `apps/web` (Nixpacks auto-detects Node/Next; build `npm run build`, start `npm run start`).
+3. **Variables:**
+   - `NEXT_PUBLIC_API_BASE_URL` = the backend domain from step 2
+   - `NEXTAUTH_SECRET` = random 32+ chars
+   - `NEXTAUTH_URL` = this service's own Railway domain (generate it first)
+4. **Generate Domain**, then set `NEXTAUTH_URL` to it.
+5. Back in the **api** service, set `ALLOWED_ORIGINS` to the web domain and redeploy.
+
+### Persistence — two choices
+- **Postgres (recommended):** the project already has it. Migrate `app/db.py` from
+  `sqlite3` to `psycopg`/SQLAlchemy and read `DATABASE_URL`. This survives every deploy.
+- **Quick path (SQLite on a volume):** the app uses SQLite at `data/trade_insight.db`.
+  On the **api** service add **Settings → Volumes → mount** at `/app/data` so the DB file
+  persists across deploys. Good enough for a small single-instance app; don't scale the
+  api service past 1 replica (the in-process daily scan + SQLite assume one instance).
+
+### Notes
+- CORS is now env-driven (`ALLOWED_ORIGINS`) — no code edit needed, just set the var.
+- Custom domain: add it on the **web** service (Settings → Networking → Custom Domain),
+  point your registrar's DNS at the value Railway shows, then update `NEXTAUTH_URL` +
+  `ALLOWED_ORIGINS` to the custom domain.
+- Keep the api service at **1 replica** so the APScheduler daily signal scan doesn't run twice.
+
 ## 5. Honesty / compliance note
 This product presents **informational technical analysis**, not financial advice. Win-rates shown are real backtested results of each rule — never marketing figures. Keep the disclaimer banner and the "not financial advice" language in place; depending on your jurisdiction, distributing trading signals may require regulatory registration (e.g. FCA in the UK). Get legal advice before charging real customers.

@@ -68,9 +68,14 @@ def _prewarm_signals():
 
 app = FastAPI(title="Trade Insight Analysis Service", lifespan=lifespan)
 
+# Allowed frontend origins. In production set ALLOWED_ORIGINS to a comma-separated
+# list of your deployed web URLs (e.g. "https://web-production.up.railway.app").
+import os as _os
+
+_origins = [o.strip() for o in _os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=_origins or ["http://localhost:3000"],
     allow_methods=["*"],
     allow_headers=["*"],
 )

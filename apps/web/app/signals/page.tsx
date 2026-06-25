@@ -1,0 +1,264 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useSession } from "next-auth/react";
+import { canSeePremiumSignals, getSignalsHistory, getSignalsToday, isFreePlan, type Signal } from "@/lib/api";
+import { RequireAuth } from "@/components/RequireAuth";
+
+function directionBadgeClass(direction: string) {
+  if (direction === "bullish") return "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+  if (direction === "bearish") return "bg-rose-500/10 text-rose-400 border border-rose-500/20";
+  return "bg-neutral-500/10 text-neutral-400 border border-neutral-500/20";
+}
+
+const TF_LABEL: Record<string, string> = {
+  "5min": "5M",
+  "15min": "15M",
+  "30min": "30M",
+  "1h": "1H",
+  "4h": "4H",
+  "1day": "1D",
+};
+
+function SignalCard({ signal, locked }: { signal: Signal; locked?: boolean }) {
+  const isPremium = signal.tier === "premium";
+  if (locked) {
+    return (
+      <div className="relative rounded-xl p-5 border border-cyan-500/30 bg-gradient-to-b from-cyan-500/5 to-neutral-900/60 overflow-hidden">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-neutral-100 flex items-center gap-2">
+            {signal.symbol}
+            {signal.interval && (
+              <span className="text-[10px] font-mono text-neutral-400 bg-neutral-800 rounded px-1.5 py-0.5">
+                {TF_LABEL[signal.interval] ?? signal.interval}
+              </span>
+            )}
+            <span className="text-[10px] text-cyan-300 bg-cyan-500/10 border border-cyan-500/20 rounded px-1.5 py-0.5">
+              premium
+            </span>
+          </h3>
+          <span className="text-[10px] uppercase tracking-wide text-neutral-500 border border-neutral-700 rounded px-1.5 py-0.5">
+            locked
+          </span>
+        </div>
+        <div className="mt-6 mb-2 text-center">
+          <p className="text-sm text-neutral-300">Premium signal — entry, stop, target &amp; reasoning</p>
+          <Link
+            href="/pricing"
+            className="mt-3 inline-block rounded-lg bg-gradient-to-br from-cyan-500 to-emerald-500 px-4 py-2 text-sm font-semibold text-neutral-950"
+          >
+            Upgrade to Ultimate to unlock
+          </Link>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div
+      className={`rounded-xl p-5 space-y-3 border ${
+        isPremium
+          ? "border-cyan-500/40 bg-gradient-to-b from-cyan-500/5 to-neutral-900/60"
+          : "border-neutral-800 bg-neutral-900/60"
+      }`}
+    >
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h3 className="font-semibold text-neutral-100 flex items-center gap-2">
+          {signal.symbol}
+          {signal.interval && (
+            <span className="text-[10px] font-mono text-neutral-400 bg-neutral-800 rounded px-1.5 py-0.5">
+              {TF_LABEL[signal.interval] ?? signal.interval}
+            </span>
+          )}
+          {isPremium && (
+            <span className="text-[10px] text-cyan-300 bg-cyan-500/10 border border-cyan-500/20 rounded px-1.5 py-0.5">
+              premium
+            </span>
+          )}
+        </h3>
+        <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${directionBadgeClass(signal.direction)}`}>
+          {signal.direction} · conf {signal.confluence_score}
+        </span>
+      </div>
+
+      {signal.entry != null && signal.stop_loss != null && signal.take_profit != null && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {[
+            { label: "Entry", value: signal.entry, color: "text-sky-400" },
+            { label: "Stop", value: signal.stop_loss, color: "text-rose-400" },
+            { label: "Target", value: signal.take_profit, color: "text-emerald-400" },
+            { label: "R:R", value: `1:${signal.risk_reward}`, color: "text-neutral-100" },
+          ].map((cell) => (
+            <div key={cell.label} className="bg-neutral-950/60 border border-neutral-800 rounded-lg px-3 py-2">
+              <p className="text-[10px] text-neutral-500">{cell.label}</p>
+              <p className={`text-sm font-mono font-semibold ${cell.color}`}>{cell.value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {signal.reasoning.commentary && (
+        <p className="text-sm text-neutral-300 italic border-l-2 border-cyan-500/40 pl-3">
+          {signal.reasoning.commentary}
+        </p>
+      )}
+
+      <p className="text-sm text-neutral-400">
+        Backtested hit-rate (this rule, this timeframe):{" "}
+        <span className="font-medium text-neutral-100">
+          {signal.backtest_hit_rate != null ? `${(signal.backtest_hit_rate * 100).toFixed(1)}%` : "not enough history yet"}
+        </span>
+      </p>
+
+      <div>
+        <h4 className="text-sm font-medium text-neutral-300 mb-1">Why this fired</h4>
+        <ul className="list-disc list-inside text-sm text-neutral-300">
+          {signal.reasoning.factors.map((f) => (
+            <li key={f}>{f.replace(/_/g, " ")}</li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function SignalsPageInner() {
+  const { data: session } = useSession();
+  const plan = (session?.user as { plan?: string } | undefined)?.plan;
+  const userId = session?.user ? Number((session.user as { id?: string }).id) : null;
+  const premiumUnlocked = canSeePremiumSignals(plan);
+  const free = isFreePlan(plan) || !session?.user;
+
+  const [today, setToday] = useState<Signal[]>([]);
+  const [history, setHistory] = useState<Signal[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [premiumOnly, setPremiumOnly] = useState(false);
+
+  useEffect(() => {
+    // free is locked to gold (XAU/USD) — the backend enforces this too
+    getSignalsToday(userId, free ? "XAUUSD" : undefined)
+      .then((t) => setToday(t.signals))
+      .catch((e) => setError(String(e)));
+    if (!free) {
+      getSignalsHistory(userId)
+        .then((h) => setHistory(h.signals))
+        .catch(() => {});
+    } else {
+      setHistory([]);
+    }
+  }, [userId, free]);
+
+  const visibleToday = useMemo(
+    () => (premiumOnly ? today.filter((s) => s.tier === "premium") : today),
+    [today, premiumOnly]
+  );
+  const premiumCount = today.filter((s) => s.tier === "premium").length;
+
+  if (free) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-lg font-semibold text-neutral-100">
+            Your daily gold signal <span className="text-neutral-500 font-normal">— XAU/USD</span>
+          </h2>
+          <p className="text-xs text-neutral-500 mt-1">
+            Free plan: one daily XAU/USD (gold) signal.{" "}
+            <Link href="/pricing" className="text-cyan-300 underline underline-offset-2">
+              Upgrade
+            </Link>{" "}
+            for all 10 markets, every timeframe, premium signals and high-confidence (80%+ backtested) highlights.
+          </p>
+        </div>
+
+        {error && <p className="text-rose-400 text-sm">{error}</p>}
+        {today.length === 0 ? (
+          <p className="text-sm text-neutral-500">
+            No qualifying daily gold signal right now — check back later.
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {today.map((s) => (
+              <SignalCard key={s.id} signal={s} />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-8">
+      <section>
+        <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
+          <div>
+            <h2 className="text-lg font-semibold text-neutral-100">
+              Today&apos;s signals{" "}
+              <span className="text-neutral-500 font-normal">
+                ({today.length} total · {premiumCount} premium)
+              </span>
+            </h2>
+            <p className="text-xs text-neutral-500 mt-1">
+              Generated across every symbol and timeframe. Premium = 1h/4h/daily agree and news doesn&apos;t
+              contradict. Each shows its own real backtested hit-rate.
+            </p>
+          </div>
+          <div className="flex items-center gap-1 bg-neutral-900 border border-neutral-800 rounded-md p-1">
+            <button
+              onClick={() => setPremiumOnly(false)}
+              className={`text-xs font-medium px-3 py-1 rounded ${
+                !premiumOnly ? "bg-cyan-500/20 text-cyan-300" : "text-neutral-400 hover:text-neutral-100"
+              }`}
+            >
+              All
+            </button>
+            <button
+              onClick={() => setPremiumOnly(true)}
+              className={`text-xs font-medium px-3 py-1 rounded ${
+                premiumOnly ? "bg-cyan-500/20 text-cyan-300" : "text-neutral-400 hover:text-neutral-100"
+              }`}
+            >
+              Premium
+            </button>
+          </div>
+        </div>
+
+        {!premiumUnlocked && premiumCount > 0 && (
+          <p className="text-xs text-cyan-300/80 mb-3">
+            {premiumCount} premium signals today are locked on your plan.{" "}
+            <Link href="/pricing" className="underline underline-offset-2">
+              Upgrade to unlock
+            </Link>
+            .
+          </p>
+        )}
+
+        {error && <p className="text-rose-400 text-sm">{error}</p>}
+        {visibleToday.length === 0 && !error && (
+          <p className="text-sm text-neutral-500">No qualifying setups in this view.</p>
+        )}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          {visibleToday.map((s) => (
+            <SignalCard key={s.id} signal={s} locked={s.tier === "premium" && !premiumUnlocked} />
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold text-neutral-100 mb-3">History</h2>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          {history.map((s) => (
+            <SignalCard key={s.id} signal={s} locked={s.tier === "premium" && !premiumUnlocked} />
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+export default function SignalsPage() {
+  return (
+    <RequireAuth>
+      <SignalsPageInner />
+    </RequireAuth>
+  );
+}

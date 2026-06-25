@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+apps/analysis-service/venv/
+
+# Dev SQLite DB (don't deploy test data)
+data/*.db
+
+# Node / Next
+node_modules/
+.next/
+
+# Env / secrets
+.env
+.env*.local
