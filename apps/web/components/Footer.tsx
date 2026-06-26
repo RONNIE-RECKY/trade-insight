@@ -1,17 +1,34 @@
 import Link from "next/link";
+import { Logo } from "@/components/Logo";
+
+const PARTNERS = ["Broker Boyz", "OANDA", "TradingView", "Finnhub"];
 
 export function Footer() {
   return (
     <footer className="mt-16 border-t border-neutral-800/80 bg-[#0b0f17]">
       <div className="mx-auto max-w-5xl px-4 py-10">
-        <div className="grid grid-cols-2 gap-8 sm:grid-cols-4">
+        {/* partners */}
+        <div className="mb-10">
+          <p className="text-center text-[11px] font-semibold uppercase tracking-widest text-neutral-600">
+            Trusted partners
+          </p>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-x-8 gap-y-3">
+            {PARTNERS.map((p) => (
+              <span
+                key={p}
+                className="text-sm font-semibold tracking-wide text-neutral-500 transition-colors hover:text-emerald-400"
+              >
+                {p}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-8 sm:grid-cols-4 border-t border-neutral-800/60 pt-10">
           <div className="col-span-2 sm:col-span-1">
-            <div className="flex items-center gap-2 font-semibold text-neutral-100">
-              <span className="inline-block h-2 w-2 rounded-full bg-gradient-to-br from-cyan-400 to-emerald-400" />
-              Trade Insight
-            </div>
+            <Logo />
             <p className="mt-2 text-xs text-neutral-500">
-              Transparent, backtested market analysis. Not financial advice.
+              Multi-strategy, backtested market analysis.
             </p>
           </div>
           <div>
@@ -44,7 +61,7 @@ export function Footer() {
             Trading carries risk of loss. Signals and analysis are informational only, generated from
             public technical-analysis rules, and are not financial advice or a guarantee of returns.
           </p>
-          <p className="mt-2">© {new Date().getFullYear()} Trade Insight · Demo build.</p>
+          <p className="mt-2">© {new Date().getFullYear()} PIP HIVE. Not financial advice.</p>
         </div>
       </div>
     </footer>

@@ -299,13 +299,22 @@ export function signup(email: string, password: string) {
 }
 
 export function getPlans() {
-  return apiFetch<{ plans: Plan[] }>("/billing/plans");
+  return apiFetch<{ plans: Plan[]; payments_enabled: boolean }>("/billing/plans");
 }
 
-export function subscribe(userId: number, plan: string) {
-  return apiFetch<{ ok: boolean; plan: string; simulated: boolean }>("/billing/subscribe", {
+export function checkout(userId: number, plan: string) {
+  return apiFetch<{ url: string }>("/billing/checkout", {
     method: "POST",
     body: JSON.stringify({ user_id: userId, plan }),
+  });
+}
+
+// Admin-only manual grant (support/testing). Normal users go through checkout().
+export function adminSetPlan(adminUserId: number, targetUserId: number, plan: string) {
+  return apiFetch<{ ok: boolean; plan: string }>("/billing/subscribe", {
+    method: "POST",
+    headers: { "X-User-Id": String(adminUserId) },
+    body: JSON.stringify({ user_id: targetUserId, plan }),
   });
 }
 

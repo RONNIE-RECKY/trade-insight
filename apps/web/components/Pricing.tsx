@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { getPlans, subscribe, type Plan } from "@/lib/api";
+import { checkout, getPlans, type Plan } from "@/lib/api";
 
 export function Pricing() {
-  const { data: session, update } = useSession();
+  const { data: session } = useSession();
   const router = useRouter();
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [paymentsEnabled, setPaymentsEnabled] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -17,25 +18,35 @@ export function Pricing() {
 
   useEffect(() => {
     getPlans()
-      .then((res) => setPlans(res.plans))
+      .then((res) => {
+        setPlans(res.plans);
+        setPaymentsEnabled(res.payments_enabled);
+      })
       .catch((e) => setError(String(e)));
   }, []);
 
   async function choose(planId: string) {
+    setError(null);
+    if (planId === "free") {
+      router.push(userId ? "/account" : "/signup");
+      return;
+    }
     if (!userId) {
-      // not signed in yet — start an account, carrying the chosen plan through
-      // signup -> verify -> login, where it is auto-applied.
-      router.push(planId === "free" ? "/signup" : `/signup?plan=${planId}`);
+      // must have an account to pay
+      router.push("/signup");
+      return;
+    }
+    if (!paymentsEnabled) {
+      setError("Online checkout isn't enabled yet. Add Stripe keys to accept payments.");
       return;
     }
     setBusy(planId);
-    setError(null);
     try {
-      await subscribe(userId, planId);
-      await update({ plan: planId });
-      router.push("/account");
+      // Plan is granted only by Stripe's webhook after payment — never here.
+      const { url } = await checkout(userId, planId);
+      window.location.href = url;
     } catch (e) {
-      setError(String(e));
+      setError(String(e).replace("Error:", "").trim());
     } finally {
       setBusy(null);
     }
@@ -91,14 +102,20 @@ export function Pricing() {
                     : "border border-neutral-700 text-neutral-100 hover:border-neutral-500"
                 }`}
               >
-                {isCurrent ? "Current plan" : busy === plan.id ? "Processing…" : plan.price === 0 ? "Get started" : "Choose plan"}
+                {isCurrent
+                  ? "Current plan"
+                  : busy === plan.id
+                  ? "Redirecting…"
+                  : plan.price === 0
+                  ? "Get started"
+                  : "Upgrade"}
               </button>
             </div>
           );
         })}
       </div>
       <p className="mt-4 text-center text-xs text-neutral-600">
-        Checkout is simulated for this demo — no card is charged and no payment processor is connected.
+        Secure checkout via Stripe. Your plan activates only after payment is confirmed.
       </p>
     </div>
   );

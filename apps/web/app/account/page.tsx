@@ -3,32 +3,17 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
-import { getPlans, subscribe, type Plan } from "@/lib/api";
+import { getPlans, type Plan } from "@/lib/api";
 import { Pricing } from "@/components/Pricing";
 
 export default function AccountPage() {
-  const { data: session, status, update } = useSession();
+  const { data: session, status } = useSession();
   const plan = (session?.user as { plan?: string } | undefined)?.plan ?? "free";
-  const userId = session?.user ? Number((session.user as { id?: string }).id) : null;
   const [plans, setPlans] = useState<Plan[]>([]);
 
   useEffect(() => {
     getPlans().then((res) => setPlans(res.plans)).catch(() => {});
   }, []);
-
-  // Apply a plan chosen on the pricing page before the account existed.
-  useEffect(() => {
-    if (!userId) return;
-    const pending = typeof window !== "undefined" ? localStorage.getItem("pendingPlan") : null;
-    if (pending && pending !== "free" && pending !== plan) {
-      subscribe(userId, pending)
-        .then(() => update({ plan: pending }))
-        .catch(() => {})
-        .finally(() => localStorage.removeItem("pendingPlan"));
-    } else if (pending) {
-      localStorage.removeItem("pendingPlan");
-    }
-  }, [userId, plan, update]);
 
   if (status === "loading") return <p className="text-sm text-neutral-500">Loading…</p>;
 

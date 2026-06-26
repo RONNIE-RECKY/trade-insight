@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
+import { Logo } from "@/components/Logo";
 
 function NavLink({ href, children, onClick }: { href: string; children: React.ReactNode; onClick?: () => void }) {
   const pathname = usePathname();
@@ -31,6 +32,7 @@ const PLAN_BADGE: Record<string, string> = {
 export function NavBar() {
   const { data: session } = useSession();
   const plan = (session?.user as { plan?: string } | undefined)?.plan ?? "free";
+  const isAdmin = Boolean((session?.user as { isAdmin?: boolean } | undefined)?.isAdmin);
   const [open, setOpen] = useState(false);
 
   const links = (onClick?: () => void) => (
@@ -40,6 +42,7 @@ export function NavBar() {
       <NavLink href="/auto-trade" onClick={onClick}>Auto-Trade</NavLink>
       <NavLink href="/watchlist" onClick={onClick}>Watchlist</NavLink>
       <NavLink href="/pricing" onClick={onClick}>Pricing</NavLink>
+      {isAdmin && <NavLink href="/orso" onClick={onClick}>Admin</NavLink>}
     </>
   );
 
@@ -64,12 +67,15 @@ export function NavBar() {
       </div>
     ) : (
       <div className="flex items-center gap-3">
-        <Link href="/login" className="text-neutral-200 hover:text-neutral-50 underline underline-offset-2 text-sm">
+        <Link
+          href="/login"
+          className="glow-on-hover rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-200 hover:text-white hover:border-emerald-500/50"
+        >
           Log in
         </Link>
         <Link
           href="/signup"
-          className="rounded-md bg-gradient-to-br from-cyan-500 to-emerald-500 text-neutral-950 font-medium px-3 py-1.5 text-sm"
+          className="glow-on-hover rounded-md bg-gradient-to-br from-emerald-500 to-green-600 text-neutral-950 font-medium px-3 py-1.5 text-sm"
         >
           Sign up
         </Link>
@@ -81,9 +87,8 @@ export function NavBar() {
     <nav className="w-full border-b border-neutral-800/80 bg-[#0d1117]/80 backdrop-blur sticky top-0 z-20">
       <div className="flex items-center justify-between px-4 sm:px-6 py-3">
         <div className="flex items-center gap-6">
-          <Link href="/" className="font-semibold text-neutral-50 flex items-center gap-2">
-            <span className="inline-block w-2 h-2 rounded-full bg-gradient-to-br from-cyan-400 to-emerald-400" />
-            Trade Insight
+          <Link href="/" className="transition-opacity hover:opacity-80">
+            <Logo />
           </Link>
           {/* desktop links */}
           <div className="hidden md:flex items-center gap-6">{links()}</div>

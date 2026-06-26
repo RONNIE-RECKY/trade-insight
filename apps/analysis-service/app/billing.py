@@ -7,7 +7,7 @@ packages UI is realistic, but nothing charges a card. A real processor
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from .db import db_session
@@ -132,12 +132,24 @@ def capabilities(plan: str) -> dict:
 
 
 def user_plan(user_id: int | None) -> str:
-    """Resolve a user's plan from the DB; unauthenticated/unknown -> free."""
+    """Resolve a user's plan from the DB; unauthenticated/unknown -> free.
+    Admins always get full (platinum) access regardless of stored plan."""
     if user_id is None:
         return "free"
     with db_session() as conn:
-        row = conn.execute("SELECT plan FROM users WHERE id = ?", (user_id,)).fetchone()
-    return row["plan"] if row else "free"
+        row = conn.execute("SELECT plan, is_admin FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not row:
+        return "free"
+    return "platinum" if row["is_admin"] else row["plan"]
+
+
+import os
+
+from fastapi import Header
+
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
+WEB_BASE_URL = os.environ.get("WEB_BASE_URL", "http://localhost:3000")
 
 
 class SubscribeRequest(BaseModel):
@@ -145,19 +157,92 @@ class SubscribeRequest(BaseModel):
     plan: str
 
 
+class CheckoutRequest(BaseModel):
+    user_id: int
+    plan: str
+
+
+def _is_admin(user_id: int | None) -> bool:
+    if user_id is None:
+        return False
+    with db_session() as conn:
+        row = conn.execute("SELECT is_admin FROM users WHERE id = ?", (user_id,)).fetchone()
+    return bool(row and row["is_admin"])
+
+
+def _set_plan(user_id: int, plan: str) -> None:
+    with db_session() as conn:
+        conn.execute("UPDATE users SET plan = ? WHERE id = ?", (plan, user_id))
+
+
 @router.get("/plans")
 def list_plans():
-    return {"plans": list(PLANS.values())}
+    return {"plans": list(PLANS.values()), "payments_enabled": bool(STRIPE_SECRET_KEY)}
+
+
+@router.post("/checkout")
+def checkout(req: CheckoutRequest):
+    """Start a real paid upgrade. Returns a Stripe Checkout URL. The plan is only
+    granted by the webhook AFTER payment — never client-side. Closes the loophole
+    where anyone could switch plans for free."""
+    plan = PLANS.get(req.plan)
+    if not plan or req.plan == "free":
+        raise HTTPException(status_code=400, detail="pick a paid plan")
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=503, detail="payments are not configured yet")
+    try:
+        import stripe
+
+        stripe.api_key = STRIPE_SECRET_KEY
+        session = stripe.checkout.Session.create(
+            mode="subscription",
+            line_items=[{
+                "price_data": {
+                    "currency": "usd",
+                    "recurring": {"interval": "month"},
+                    "product_data": {"name": f"PIP HIVE {plan['name']}"},
+                    "unit_amount": int(plan["price"] * 100),
+                },
+                "quantity": 1,
+            }],
+            metadata={"user_id": str(req.user_id), "plan": req.plan},
+            success_url=f"{WEB_BASE_URL}/account?upgraded=1",
+            cancel_url=f"{WEB_BASE_URL}/pricing",
+        )
+        return {"url": session.url}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"checkout error: {e}")
+
+
+@router.post("/webhook")
+async def stripe_webhook(request: Request):
+    """Stripe calls this after a successful payment; only here is a plan granted."""
+    if not STRIPE_SECRET_KEY or not STRIPE_WEBHOOK_SECRET:
+        raise HTTPException(status_code=503, detail="webhook not configured")
+    import stripe
+
+    payload = await request.body()
+    sig = request.headers.get("stripe-signature", "")
+    try:
+        event = stripe.Webhook.construct_event(payload, sig, STRIPE_WEBHOOK_SECRET)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"invalid webhook: {e}")
+
+    if event["type"] == "checkout.session.completed":
+        md = event["data"]["object"].get("metadata") or {}
+        uid, plan = md.get("user_id"), md.get("plan")
+        if uid and plan in PLANS:
+            _set_plan(int(uid), plan)
+    return {"received": True}
 
 
 @router.post("/subscribe")
-def subscribe(req: SubscribeRequest):
+def subscribe(req: SubscribeRequest, x_user_id: int | None = Header(default=None)):
+    """Admin-only manual plan grant (support / testing). Normal users must pay
+    via /checkout — this endpoint no longer lets anyone self-assign a plan."""
+    if not _is_admin(x_user_id):
+        raise HTTPException(status_code=403, detail="plan changes require payment via checkout")
     if req.plan not in PLANS:
         raise HTTPException(status_code=400, detail=f"unknown plan '{req.plan}'")
-    with db_session() as conn:
-        row = conn.execute("SELECT id FROM users WHERE id = ?", (req.user_id,)).fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="user not found")
-        conn.execute("UPDATE users SET plan = ? WHERE id = ?", (req.plan, req.user_id))
-    # NOTE: simulated — no payment is taken.
-    return {"ok": True, "plan": req.plan, "simulated": True}
+    _set_plan(req.user_id, req.plan)
+    return {"ok": True, "plan": req.plan, "by_admin": True}
