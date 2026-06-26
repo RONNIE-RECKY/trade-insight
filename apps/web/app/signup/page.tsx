@@ -16,6 +16,7 @@ export default function SignupPage() {
   const [stage, setStage] = useState<"form" | "code">("form");
   const [code, setCode] = useState("");
   const [devCode, setDevCode] = useState<string | null>(null);
+  const [emailAttempted, setEmailAttempted] = useState(false);
   const [verifying, setVerifying] = useState(false);
 
   async function handleSignup(e: React.FormEvent) {
@@ -27,6 +28,7 @@ export default function SignupPage() {
       const plan = new URLSearchParams(window.location.search).get("plan");
       if (plan) localStorage.setItem("pendingPlan", plan);
       setDevCode(res.verification_code ?? null);
+      setEmailAttempted(Boolean(res.email_sent));
       setStage("code");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Signup failed.");
@@ -54,6 +56,7 @@ export default function SignupPage() {
     try {
       const res = await resendCode(email);
       setDevCode(res.verification_code ?? null);
+      setEmailAttempted(Boolean(res.email_sent));
     } catch {
       setError("Couldn't resend the code.");
     }
@@ -64,12 +67,15 @@ export default function SignupPage() {
       <div className="max-w-sm mx-auto bg-neutral-900/60 border border-neutral-800 rounded-xl p-6 space-y-4">
         <h1 className="text-lg font-semibold text-neutral-100">Enter your code</h1>
         <p className="text-sm text-neutral-400">
-          We emailed a 6-digit verification code to <span className="text-neutral-200">{email}</span>.
-          Enter it below to activate your account.
+          {emailAttempted
+            ? <>We sent a 6-digit verification code to <span className="text-neutral-200">{email}</span>. Enter it below to activate your account.</>
+            : <>Enter the 6-digit code below to activate your account.</>}
         </p>
         {devCode && (
           <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-200">
-            Demo mode (no email provider configured) — your code is{" "}
+            {emailAttempted
+              ? "Email may take a minute to arrive (check spam) — or use this code now:"
+              : "Your verification code:"}{" "}
             <span className="font-mono text-base tracking-widest text-amber-100">{devCode}</span>
           </div>
         )}

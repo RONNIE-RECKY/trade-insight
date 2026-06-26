@@ -138,10 +138,11 @@ def signup(req: SignupRequest):
     if not verified:
         sent = _send_verification_code(req.email, code)
         response["email_sent"] = sent
-        # If we couldn't actually email it, hand the code back so the user is
-        # never stuck (dev mode, or a misconfigured/failing provider).
-        if not sent:
-            response["verification_code"] = code
+        # Always hand the code back too. A provider can report success (e.g.
+        # a sandbox sender that "sends" but never actually delivers) without
+        # the email reaching the inbox — so the on-screen code is the one
+        # guarantee that a user is never stuck, regardless of email status.
+        response["verification_code"] = code
     return response
 
 
@@ -172,10 +173,7 @@ def resend_code(req: ResendRequest):
         code = _new_code()
         conn.execute("UPDATE users SET verification_token = ? WHERE id = ?", (code, row["id"]))
     sent = _send_verification_code(req.email, code)
-    out = {"ok": True, "email_sent": sent}
-    if not sent:
-        out["verification_code"] = code
-    return out
+    return {"ok": True, "email_sent": sent, "verification_code": code}
 
 
 @router.post("/auth/login")
