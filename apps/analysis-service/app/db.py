@@ -110,9 +110,33 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
+# Columns added over time — applied to existing DBs so a persisted volume
+# (which keeps an older schema) gets upgraded safely on boot.
+_MIGRATIONS = [
+    ("users", "plan", "TEXT NOT NULL DEFAULT 'free'"),
+    ("users", "verified", "INTEGER NOT NULL DEFAULT 0"),
+    ("users", "verification_token", "TEXT"),
+    ("users", "api_key", "TEXT"),
+    ("signals", "interval", "TEXT"),
+    ("signals", "tier", "TEXT"),
+    ("signals", "entry", "REAL"),
+    ("signals", "stop_loss", "REAL"),
+    ("signals", "take_profit", "REAL"),
+    ("signals", "risk_reward", "REAL"),
+    ("auto_trades", "venue", "TEXT NOT NULL DEFAULT 'simulated'"),
+    ("auto_trades", "broker_ref", "TEXT"),
+]
+
+
 def init_db() -> None:
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        # idempotent column migrations for pre-existing databases
+        for table, column, decl in _MIGRATIONS:
+            try:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
 
 @contextmanager
