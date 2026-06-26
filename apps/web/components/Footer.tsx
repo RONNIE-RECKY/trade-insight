@@ -1,16 +1,9 @@
 import Link from "next/link";
 import { Logo } from "@/components/Logo";
+import { PartnerLogo } from "@/components/PartnerLogo";
 
-const PARTNERS = ["Broker Boyz", "OANDA", "TradingView", "Finnhub"];
-
-function HiveKonnect() {
-  return (
-    <span className="text-sm font-bold tracking-tight">
-      <span className="text-neutral-300">HIVE</span>
-      <span className="text-green-500">konnect</span>
-    </span>
-  );
-}
+// Text-only partners (no logo file). The two with logos render as images.
+const TEXT_PARTNERS = ["OANDA", "TradingView", "Finnhub"];
 
 export function Footer() {
   return (
@@ -21,9 +14,10 @@ export function Footer() {
           <p className="text-center text-[11px] font-semibold uppercase tracking-widest text-neutral-600">
             Trusted partners
           </p>
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-x-8 gap-y-3">
-            <HiveKonnect />
-            {PARTNERS.map((p) => (
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
+            <PartnerLogo src="/partners/hive-konnect.png" name="HIVE Konnect" />
+            <PartnerLogo src="/partners/broke-boyz.png" name="Broke Boyz" />
+            {TEXT_PARTNERS.map((p) => (
               <span
                 key={p}
                 className="text-sm font-semibold tracking-wide text-neutral-500 transition-colors hover:text-emerald-400"
