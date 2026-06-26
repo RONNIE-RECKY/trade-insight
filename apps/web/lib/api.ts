@@ -181,6 +181,12 @@ export function getApiKey(userId: number) {
   return apiFetch<{ api_key: string }>("/billing/api-key", userHeaders(userId));
 }
 
+export type StrategyWeight = { name: string; wins: number; total: number; weight: number };
+
+export function getLearningStats() {
+  return apiFetch<{ strategies: StrategyWeight[] }>("/learning/stats");
+}
+
 export type AutoTradeSettings = {
   enabled: boolean;
   max_open: number;

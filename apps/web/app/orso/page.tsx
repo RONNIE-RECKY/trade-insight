@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
-import { getAdminOverview, getAdminSignals, getAdminUsers, type AdminOverview, type AdminUser, type Signal } from "@/lib/api";
+import { getAdminOverview, getAdminSignals, getAdminUsers, getLearningStats, type AdminOverview, type AdminUser, type Signal, type StrategyWeight } from "@/lib/api";
 
 // Admin console at an unlisted path (no nav link) + server-side is_admin check.
 export default function ControlPage() {
@@ -14,6 +14,7 @@ export default function ControlPage() {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
+  const [learning, setLearning] = useState<StrategyWeight[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -25,6 +26,7 @@ export default function ControlPage() {
         setSignals(s.signals);
       })
       .catch((e) => setError(String(e)));
+    getLearningStats().then((r) => setLearning(r.strategies)).catch(() => {});
   }, [isAdmin, userId]);
 
   if (status === "loading") return <p className="text-sm text-neutral-500">Loading…</p>;
@@ -85,6 +87,29 @@ export default function ControlPage() {
           </div>
         </section>
       )}
+
+      <section>
+        <h2 className="text-sm font-medium text-neutral-300 mb-2">Strategy learning (adaptive weights)</h2>
+        <div className="bg-neutral-900/60 border border-neutral-800 rounded-xl divide-y divide-neutral-800">
+          {learning.length === 0 ? (
+            <p className="px-4 py-3 text-sm text-neutral-500">
+              No graded trades yet — weights stay neutral (1.0) until the bot&apos;s paper trades close.
+            </p>
+          ) : (
+            learning.map((s) => (
+              <div key={s.name} className="flex items-center justify-between px-4 py-2 text-sm">
+                <span className="text-neutral-200">{s.name}</span>
+                <span className="text-xs text-neutral-500">
+                  {s.wins}/{s.total} wins ·{" "}
+                  <span className={s.weight > 1 ? "text-emerald-400" : s.weight < 1 ? "text-rose-400" : "text-neutral-400"}>
+                    weight {s.weight}
+                  </span>
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
 
       <section>
         <h2 className="text-sm font-medium text-neutral-300 mb-2">Users</h2>

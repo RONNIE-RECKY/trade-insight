@@ -44,12 +44,20 @@ def run_backtest(
     closes = df["close"].astype(float).to_numpy()
     ts_values = df["ts"].astype(str).to_numpy()
 
+    # fetch learned weights once (not per bar) to keep the walk O(n)
+    try:
+        from .learning import get_weights
+
+        weights = get_weights()
+    except Exception:
+        weights = {}
+
     trades = []
 
     for i in range(MIN_LOOKBACK, len(df) - lookahead):
         ind_signals = indicator_signals_at(enriched, i)
         pats = patterns_as_of(swings, i)
-        result = evaluate_strategies(ind_signals, pats)
+        result = evaluate_strategies(ind_signals, pats, weights)
 
         if result["direction"] == "neutral" or result["confluence_score"] < min_confluence:
             continue

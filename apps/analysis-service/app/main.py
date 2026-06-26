@@ -246,6 +246,14 @@ def run_signal_scan_now_route():
     return {"signals": run_daily_signal_scan()}
 
 
+@app.get("/learning/stats")
+def learning_stats_route():
+    """Adaptive learning: each strategy's win record + learned weight."""
+    from .learning import stats
+
+    return {"strategies": stats()}
+
+
 @app.get("/api/v1/signals")
 def public_signals_api(api_key: str):
     """Platinum programmatic access: returns today's signals for a valid API key."""

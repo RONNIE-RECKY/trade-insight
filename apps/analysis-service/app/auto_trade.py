@@ -154,6 +154,12 @@ def _open_from_signals(user_id: int, settings: dict) -> None:
 def sync(user_id: int) -> None:
     settings = get_settings(user_id)
     _evaluate_open(user_id)  # always update open positions vs latest price
+    try:
+        from .learning import apply_outcomes
+
+        apply_outcomes()  # feed any newly-closed trades into strategy learning
+    except Exception:
+        pass
     if settings["enabled"]:
         _open_from_signals(user_id, settings)
 

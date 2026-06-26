@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS auto_trades (
     pnl_pct REAL,
     venue TEXT NOT NULL DEFAULT 'simulated', -- simulated | demo | live-pending
     broker_ref TEXT,                         -- broker order id when executed on a demo account
+    learned INTEGER NOT NULL DEFAULT 0,      -- 1 once its outcome fed the learning loop
     opened_at TEXT NOT NULL DEFAULT (datetime('now')),
     closed_at TEXT
 );
@@ -98,6 +99,16 @@ CREATE TABLE IF NOT EXISTS broker_connections (
     account_id TEXT,
     token TEXT,
     risk_acknowledged INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Adaptive "learning": each strategy's measured win record drives the weight
+-- it gets in the consensus. Updated from closed paper trades over time.
+CREATE TABLE IF NOT EXISTS strategy_weights (
+    name TEXT PRIMARY KEY,
+    wins INTEGER NOT NULL DEFAULT 0,
+    total INTEGER NOT NULL DEFAULT 0,
+    weight REAL NOT NULL DEFAULT 1.0,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
@@ -125,6 +136,7 @@ _MIGRATIONS = [
     ("signals", "risk_reward", "REAL"),
     ("auto_trades", "venue", "TEXT NOT NULL DEFAULT 'simulated'"),
     ("auto_trades", "broker_ref", "TEXT"),
+    ("auto_trades", "learned", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 

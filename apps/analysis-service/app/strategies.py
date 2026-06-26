@@ -67,8 +67,11 @@ def _pattern_strategy(patterns: list[dict]) -> dict:
     return {"name": "Pattern", "signal": "neutral", "reason": "no decisive pattern"}
 
 
-def evaluate_strategies(sig: dict, patterns: list[dict]) -> dict:
-    """Run all strategies and aggregate their votes into a direction + score."""
+def evaluate_strategies(sig: dict, patterns: list[dict], weights: dict[str, float] | None = None) -> dict:
+    """Run all strategies and aggregate their votes into a direction + score.
+
+    `weights` (learned per-strategy multipliers) bias the decision toward
+    strategies that have historically performed; defaults to 1.0 each."""
     strategies = [
         _trend_following(sig),
         _momentum(sig),
@@ -77,13 +80,26 @@ def evaluate_strategies(sig: dict, patterns: list[dict]) -> dict:
         _breakout(sig, patterns),
         _pattern_strategy(patterns),
     ]
+    if weights is None:
+        try:
+            from .learning import get_weights
+
+            weights = get_weights()
+        except Exception:
+            weights = {}
+
+    def w(name: str) -> float:
+        return float(weights.get(name, 1.0))
 
     bulls = [s for s in strategies if s["signal"] == "bullish"]
     bears = [s for s in strategies if s["signal"] == "bearish"]
+    bull_w = sum(w(s["name"]) for s in bulls)
+    bear_w = sum(w(s["name"]) for s in bears)
 
-    if len(bulls) > len(bears):
+    # weighted decision, but report agreement as the plain vote count
+    if bull_w > bear_w:
         direction, agreeing = "bullish", bulls
-    elif len(bears) > len(bulls):
+    elif bear_w > bull_w:
         direction, agreeing = "bearish", bears
     else:
         direction, agreeing = "neutral", []
