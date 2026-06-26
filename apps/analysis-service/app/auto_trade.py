@@ -86,11 +86,29 @@ def _evaluate_open(user_id: int) -> None:
                 )
 
 
+def _tradeable(sig: dict) -> bool:
+    return (
+        sig.get("direction") in ("bullish", "bearish")
+        and sig.get("entry") is not None
+        and sig.get("stop_loss") is not None
+        and sig.get("take_profit") is not None
+    )
+
+
 def _open_from_signals(user_id: int, settings: dict) -> None:
     """Auto-open simulated positions from today's qualifying signals."""
-    from .signal_job import get_today_signal
+    from .signal_job import get_today_signal, run_daily_signal_scan
 
     signals = get_today_signal()
+    if not signals:  # nothing scanned yet today — generate now so the bot has something to trade
+        signals = run_daily_signal_scan()
+
+    candidates = [s for s in signals if _tradeable(s)]
+    if settings["only_high_confidence"]:
+        premium = [s for s in candidates if s.get("tier") == "premium"]
+        # fall back to all tradeable signals if no premium ones exist, so the bot still acts
+        candidates = premium or candidates
+
     with db_session() as conn:
         open_count = conn.execute(
             "SELECT COUNT(*) AS c FROM auto_trades WHERE user_id=? AND status='open'", (user_id,)
@@ -102,15 +120,9 @@ def _open_from_signals(user_id: int, settings: dict) -> None:
             ).fetchall()
         }
 
-    for sig in signals:
+    for sig in candidates:
         if open_count >= settings["max_open"]:
             break
-        if settings["only_high_confidence"] and sig.get("tier") != "premium":
-            continue
-        if sig.get("direction") not in ("bullish", "bearish"):
-            continue
-        if sig.get("entry") is None or sig.get("stop_loss") is None or sig.get("take_profit") is None:
-            continue
         if sig["id"] in taken:
             continue
 

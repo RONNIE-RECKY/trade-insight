@@ -195,6 +195,54 @@ export default function LandingPage() {
         ))}
       </section>
 
+      {/* Dashboard snapshot */}
+      <section>
+        <h2 className="text-center text-2xl font-bold text-neutral-100">Your dashboard at a glance</h2>
+        <p className="mx-auto mt-2 max-w-xl text-center text-sm text-neutral-500">
+          Live charts, multi-strategy signals with entry/stop/target, and an automated bot — all in one place.
+        </p>
+        <div className="mx-auto mt-8 max-w-3xl rounded-2xl border border-neutral-800 bg-neutral-900/60 p-3 shadow-2xl">
+          <div className="flex items-center gap-1.5 px-2 py-2">
+            <span className="h-2.5 w-2.5 rounded-full bg-rose-400/70" />
+            <span className="h-2.5 w-2.5 rounded-full bg-amber-400/70" />
+            <span className="h-2.5 w-2.5 rounded-full bg-emerald-400/70" />
+            <span className="ml-3 text-xs font-mono text-neutral-500">pip-hive · dashboard</span>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 p-2">
+            <div className="sm:col-span-2 rounded-xl border border-neutral-800 bg-neutral-950/60 p-3">
+              <ChartGlyph />
+            </div>
+            <div className="space-y-2">
+              {[
+                { s: "XAUUSD", d: "bullish", c: "text-emerald-400" },
+                { s: "EURUSD", d: "bearish", c: "text-rose-400" },
+                { s: "BTCUSD", d: "bullish", c: "text-emerald-400" },
+              ].map((row) => (
+                <div key={row.s} className="rounded-lg border border-neutral-800 bg-neutral-950/60 p-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-neutral-200">{row.s}</span>
+                    <span className={row.c}>{row.d}</span>
+                  </div>
+                  <div className="mt-1 font-mono text-[10px] text-neutral-500">E · SL · TP set</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-2 p-2">
+            {[
+              { l: "Win rate", v: "backtested" },
+              { l: "Strategies", v: "6 / vote" },
+              { l: "Auto-bot", v: "running" },
+            ].map((k) => (
+              <div key={k.l} className="rounded-lg border border-neutral-800 bg-neutral-950/60 px-3 py-2 text-center">
+                <p className="text-[10px] text-neutral-500">{k.l}</p>
+                <p className="text-xs font-semibold text-emerald-400">{k.v}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* Features */}
       <section>
         <h2 className="text-center text-2xl font-bold text-neutral-100">What&apos;s under the hood</h2>

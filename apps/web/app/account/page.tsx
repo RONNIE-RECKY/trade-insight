@@ -3,17 +3,33 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
-import { getPlans, type Plan } from "@/lib/api";
+import { getApiKey, getPlans, hasApiAccess, type Plan } from "@/lib/api";
 import { Pricing } from "@/components/Pricing";
 
 export default function AccountPage() {
   const { data: session, status } = useSession();
   const plan = (session?.user as { plan?: string } | undefined)?.plan ?? "free";
+  const userId = session?.user ? Number((session.user as { id?: string }).id) : null;
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [apiKey, setApiKey] = useState<string | null>(null);
+  const [apiBusy, setApiBusy] = useState(false);
 
   useEffect(() => {
     getPlans().then((res) => setPlans(res.plans)).catch(() => {});
   }, []);
+
+  async function revealApiKey() {
+    if (!userId) return;
+    setApiBusy(true);
+    try {
+      const res = await getApiKey(userId);
+      setApiKey(res.api_key);
+    } catch {
+      /* not entitled */
+    } finally {
+      setApiBusy(false);
+    }
+  }
 
   if (status === "loading") return <p className="text-sm text-neutral-500">Loading…</p>;
 
@@ -56,6 +72,33 @@ export default function AccountPage() {
           </>
         )}
       </div>
+
+      {hasApiAccess(plan) && (
+        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6">
+          <p className="text-xs uppercase tracking-wide text-emerald-300">Platinum · API access</p>
+          <p className="mt-1 text-sm text-neutral-400">
+            Pull today&apos;s signals programmatically. Keep this key secret.
+          </p>
+          {apiKey ? (
+            <div className="mt-3 space-y-2">
+              <code className="block break-all rounded-lg border border-neutral-800 bg-neutral-950/60 px-3 py-2 text-xs text-emerald-300">
+                {apiKey}
+              </code>
+              <p className="text-xs text-neutral-500 font-mono break-all">
+                GET /api/v1/signals?api_key={apiKey.slice(0, 10)}…
+              </p>
+            </div>
+          ) : (
+            <button
+              onClick={revealApiKey}
+              disabled={apiBusy}
+              className="mt-3 rounded-lg border border-emerald-500/40 px-4 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-50"
+            >
+              {apiBusy ? "Loading…" : "Reveal API key"}
+            </button>
+          )}
+        </div>
+      )}
 
       <div>
         <h2 className="text-lg font-semibold text-neutral-100 mb-1">Change package</h2>

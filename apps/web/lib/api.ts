@@ -165,6 +165,22 @@ export function canAutoTrade(plan?: string) {
   return (PLAN_RANK[plan ?? "free"] ?? 0) >= PLAN_RANK.ultimate;
 }
 
+export function hasApiAccess(plan?: string) {
+  return (PLAN_RANK[plan ?? "free"] ?? 0) >= PLAN_RANK.platinum;
+}
+
+// Daily signal caps per plan (must match billing.py capabilities).
+export const PLAN_DAILY_CAP: Record<string, number | null> = {
+  free: 1,
+  pro: 10,
+  ultimate: 40,
+  platinum: null, // unlimited
+};
+
+export function getApiKey(userId: number) {
+  return apiFetch<{ api_key: string }>("/billing/api-key", userHeaders(userId));
+}
+
 export type AutoTradeSettings = {
   enabled: boolean;
   max_open: number;

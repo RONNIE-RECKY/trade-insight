@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
     plan TEXT NOT NULL DEFAULT 'free',
     verified INTEGER NOT NULL DEFAULT 0,
     verification_token TEXT,
+    api_key TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -62,7 +63,7 @@ CREATE TABLE IF NOT EXISTS auto_trade_settings (
     user_id INTEGER PRIMARY KEY,
     enabled INTEGER NOT NULL DEFAULT 0,
     max_open INTEGER NOT NULL DEFAULT 5,
-    only_high_confidence INTEGER NOT NULL DEFAULT 1,
+    only_high_confidence INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

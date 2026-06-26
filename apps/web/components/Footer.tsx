@@ -3,6 +3,15 @@ import { Logo } from "@/components/Logo";
 
 const PARTNERS = ["Broker Boyz", "OANDA", "TradingView", "Finnhub"];
 
+function HiveKonnect() {
+  return (
+    <span className="text-sm font-bold tracking-tight">
+      <span className="text-neutral-300">HIVE</span>
+      <span className="text-green-500">konnect</span>
+    </span>
+  );
+}
+
 export function Footer() {
   return (
     <footer className="mt-16 border-t border-neutral-800/80 bg-[#0b0f17]">
@@ -13,6 +22,7 @@ export function Footer() {
             Trusted partners
           </p>
           <div className="mt-4 flex flex-wrap items-center justify-center gap-x-8 gap-y-3">
+            <HiveKonnect />
             {PARTNERS.map((p) => (
               <span
                 key={p}

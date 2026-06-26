@@ -236,6 +236,22 @@ async def stripe_webhook(request: Request):
     return {"received": True}
 
 
+@router.get("/api-key")
+def get_api_key(x_user_id: int | None = Header(default=None)):
+    """Platinum perk: a personal API key for programmatic access to signals."""
+    if not _is_admin(x_user_id) and user_plan(x_user_id) != "platinum":
+        raise HTTPException(status_code=403, detail="API access requires the Platinum plan")
+    import secrets
+
+    with db_session() as conn:
+        row = conn.execute("SELECT api_key FROM users WHERE id = ?", (x_user_id,)).fetchone()
+        key = row["api_key"] if row and row["api_key"] else None
+        if not key:
+            key = "ph_" + secrets.token_urlsafe(24)
+            conn.execute("UPDATE users SET api_key = ? WHERE id = ?", (key, x_user_id))
+    return {"api_key": key}
+
+
 @router.post("/subscribe")
 def subscribe(req: SubscribeRequest, x_user_id: int | None = Header(default=None)):
     """Admin-only manual plan grant (support / testing). Normal users must pay

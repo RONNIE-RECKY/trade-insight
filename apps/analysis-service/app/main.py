@@ -244,3 +244,15 @@ def get_signals_history_route(limit: int = 30, symbol: str | None = None, x_user
 @app.post("/signals/run-now")
 def run_signal_scan_now_route():
     return {"signals": run_daily_signal_scan()}
+
+
+@app.get("/api/v1/signals")
+def public_signals_api(api_key: str):
+    """Platinum programmatic access: returns today's signals for a valid API key."""
+    from .db import db_session
+
+    with db_session() as conn:
+        row = conn.execute("SELECT plan, is_admin FROM users WHERE api_key = ?", (api_key,)).fetchone()
+    if not row or (row["plan"] != "platinum" and not row["is_admin"]):
+        raise HTTPException(status_code=401, detail="invalid or non-Platinum API key")
+    return {"signals": get_today_signal(), "count": len(get_today_signal())}
