@@ -19,47 +19,57 @@ router = APIRouter()
 
 _ITERATIONS = 200_000
 
-# Public base URL of the web app, used to build verification links.
+# Public base URL of the web app.
 WEB_BASE_URL = os.environ.get("WEB_BASE_URL", "http://localhost:3000")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
 RESEND_FROM = os.environ.get("RESEND_FROM", "PIP HIVE <onboarding@resend.dev>")
-SMTP_HOST = os.environ.get("SMTP_HOST")
-# When no email provider is configured we run in dev mode and surface the
-# verification code in the API response instead of emailing it.
-EMAIL_CONFIGURED = bool(SMTP_HOST or RESEND_API_KEY)
+# Gmail (or any SMTP): set SMTP_USER + SMTP_PASS (a Gmail App Password). SMTP_HOST
+# defaults to Gmail so for Gmail you only need USER + PASS.
+SMTP_USER = os.environ.get("SMTP_USER")
+SMTP_PASS = os.environ.get("SMTP_PASS")
+SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_FROM = os.environ.get("SMTP_FROM") or SMTP_USER
+# Email is "configured" if Resend OR Gmail/SMTP credentials are present.
+EMAIL_CONFIGURED = bool(RESEND_API_KEY or (SMTP_USER and SMTP_PASS))
 
 
-def _send_verification_code(email: str, code: str) -> None:
-    """Send the 6-digit code via Resend (preferred) or SMTP. In dev mode (no
-    provider configured) this no-ops and the code is shown to the client."""
+def _send_verification_code(email: str, code: str) -> bool:
+    """Send the 6-digit code via Gmail/SMTP or Resend. Returns True only if an
+    email was actually sent, so signup can fall back to showing the code."""
     subject = "Your PIP HIVE verification code"
-    body = f"Welcome to PIP HIVE.\n\nYour verification code is: {code}\n\nEnter it on the site to activate your account."
+    body = (
+        f"Welcome to PIP HIVE.\n\nYour verification code is: {code}\n\n"
+        "Enter it on the site to activate your account.\n\nIf you didn't request this, ignore this email."
+    )
+
+    if SMTP_USER and SMTP_PASS:
+        try:
+            msg = MIMEText(body)
+            msg["Subject"] = subject
+            msg["From"] = SMTP_FROM or SMTP_USER
+            msg["To"] = email
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as s:
+                s.starttls()
+                s.login(SMTP_USER, SMTP_PASS)
+                s.send_message(msg)
+            return True
+        except Exception:  # noqa: BLE001 — fall through to other providers / on-screen code
+            pass
 
     if RESEND_API_KEY:
         try:
-            httpx.post(
+            r = httpx.post(
                 "https://api.resend.com/emails",
                 headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
                 json={"from": RESEND_FROM, "to": [email], "subject": subject, "text": body},
                 timeout=15,
             )
-        except Exception:  # noqa: BLE001 — never block signup on email failure
-            pass
-        return
-
-    if SMTP_HOST:
-        try:
-            msg = MIMEText(body)
-            msg["Subject"] = subject
-            msg["From"] = os.environ.get("SMTP_FROM", "noreply@pip-hive.app")
-            msg["To"] = email
-            with smtplib.SMTP(SMTP_HOST, int(os.environ.get("SMTP_PORT", "587"))) as s:
-                s.starttls()
-                if os.environ.get("SMTP_USER"):
-                    s.login(os.environ["SMTP_USER"], os.environ.get("SMTP_PASS", ""))
-                s.send_message(msg)
+            return r.status_code < 300
         except Exception:  # noqa: BLE001
             pass
+
+    return False
 
 
 def _new_code() -> str:
@@ -126,10 +136,11 @@ def signup(req: SignupRequest):
 
     response = {"id": cur.lastrowid, "email": req.email, "is_admin": bool(is_admin), "plan": plan, "verified": bool(verified)}
     if not verified:
-        _send_verification_code(req.email, code)
-        response["email_sent"] = EMAIL_CONFIGURED
-        # Dev mode: no email provider configured, so return the code directly.
-        if not EMAIL_CONFIGURED:
+        sent = _send_verification_code(req.email, code)
+        response["email_sent"] = sent
+        # If we couldn't actually email it, hand the code back so the user is
+        # never stuck (dev mode, or a misconfigured/failing provider).
+        if not sent:
             response["verification_code"] = code
     return response
 
@@ -160,9 +171,9 @@ def resend_code(req: ResendRequest):
             return {"ok": True, "verified": True}
         code = _new_code()
         conn.execute("UPDATE users SET verification_token = ? WHERE id = ?", (code, row["id"]))
-    _send_verification_code(req.email, code)
-    out = {"ok": True, "email_sent": EMAIL_CONFIGURED}
-    if not EMAIL_CONFIGURED:
+    sent = _send_verification_code(req.email, code)
+    out = {"ok": True, "email_sent": sent}
+    if not sent:
         out["verification_code"] = code
     return out
 
