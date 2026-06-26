@@ -6,7 +6,10 @@ import hashlib
 import hmac
 import os
 import secrets
+import smtplib
+from email.mime.text import MIMEText
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -18,27 +21,45 @@ _ITERATIONS = 200_000
 
 # Public base URL of the web app, used to build verification links.
 WEB_BASE_URL = os.environ.get("WEB_BASE_URL", "http://localhost:3000")
-# When no email provider is configured we run in dev mode and return the
-# verification link in the API response instead of emailing it.
-EMAIL_CONFIGURED = bool(os.environ.get("SMTP_HOST") or os.environ.get("RESEND_API_KEY"))
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
+RESEND_FROM = os.environ.get("RESEND_FROM", "PIP HIVE <onboarding@resend.dev>")
+SMTP_HOST = os.environ.get("SMTP_HOST")
+# When no email provider is configured we run in dev mode and surface the
+# verification code in the API response instead of emailing it.
+EMAIL_CONFIGURED = bool(SMTP_HOST or RESEND_API_KEY)
 
 
 def _send_verification_code(email: str, code: str) -> None:
-    """Send the 6-digit verification code by email. Wire your provider here
-    (Resend / SendGrid / SMTP). In dev mode (no provider configured) the code
-    is surfaced to the client instead so signup is still testable.
+    """Send the 6-digit code via Resend (preferred) or SMTP. In dev mode (no
+    provider configured) this no-ops and the code is shown to the client."""
+    subject = "Your PIP HIVE verification code"
+    body = f"Welcome to PIP HIVE.\n\nYour verification code is: {code}\n\nEnter it on the site to activate your account."
 
-    Example (Resend):
-        import httpx, os
-        httpx.post("https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {os.environ['RESEND_API_KEY']}"},
-            json={"from": "Trade Insight <noreply@yourdomain>", "to": [email],
-                  "subject": "Your verification code",
-                  "text": f"Your Trade Insight code is {code}"})
-    """
-    if not EMAIL_CONFIGURED:
+    if RESEND_API_KEY:
+        try:
+            httpx.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+                json={"from": RESEND_FROM, "to": [email], "subject": subject, "text": body},
+                timeout=15,
+            )
+        except Exception:  # noqa: BLE001 — never block signup on email failure
+            pass
         return
-    # Production: send `code` to `email` via your provider of choice.
+
+    if SMTP_HOST:
+        try:
+            msg = MIMEText(body)
+            msg["Subject"] = subject
+            msg["From"] = os.environ.get("SMTP_FROM", "noreply@pip-hive.app")
+            msg["To"] = email
+            with smtplib.SMTP(SMTP_HOST, int(os.environ.get("SMTP_PORT", "587"))) as s:
+                s.starttls()
+                if os.environ.get("SMTP_USER"):
+                    s.login(os.environ["SMTP_USER"], os.environ.get("SMTP_PASS", ""))
+                s.send_message(msg)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _new_code() -> str:

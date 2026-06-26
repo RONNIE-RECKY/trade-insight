@@ -36,10 +36,7 @@ export function Pricing() {
       router.push("/signup");
       return;
     }
-    if (!paymentsEnabled) {
-      setError("Online checkout isn't enabled yet. Add Stripe keys to accept payments.");
-      return;
-    }
+    if (!paymentsEnabled) return; // button is disabled in this state
     setBusy(planId);
     try {
       // Plan is granted only by Stripe's webhook after payment — never here.
@@ -93,29 +90,38 @@ export function Pricing() {
                   </li>
                 ))}
               </ul>
-              <button
-                onClick={() => choose(plan.id)}
-                disabled={isCurrent || busy === plan.id}
-                className={`mt-6 rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-60 ${
-                  plan.popular
-                    ? "bg-gradient-to-br from-cyan-500 to-emerald-500 text-neutral-950"
-                    : "border border-neutral-700 text-neutral-100 hover:border-neutral-500"
-                }`}
-              >
-                {isCurrent
-                  ? "Current plan"
-                  : busy === plan.id
-                  ? "Redirecting…"
-                  : plan.price === 0
-                  ? "Get started"
-                  : "Upgrade"}
-              </button>
+              {(() => {
+                const paidLocked = plan.price > 0 && !paymentsEnabled;
+                return (
+                  <button
+                    onClick={() => choose(plan.id)}
+                    disabled={isCurrent || busy === plan.id || paidLocked}
+                    className={`mt-6 rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-60 ${
+                      plan.popular
+                        ? "bg-gradient-to-br from-cyan-500 to-emerald-500 text-neutral-950"
+                        : "border border-neutral-700 text-neutral-100 hover:border-neutral-500"
+                    }`}
+                  >
+                    {isCurrent
+                      ? "Current plan"
+                      : paidLocked
+                      ? "Coming soon"
+                      : busy === plan.id
+                      ? "Redirecting…"
+                      : plan.price === 0
+                      ? "Get started"
+                      : "Upgrade"}
+                  </button>
+                );
+              })()}
             </div>
           );
         })}
       </div>
       <p className="mt-4 text-center text-xs text-neutral-600">
-        Secure checkout via Stripe. Your plan activates only after payment is confirmed.
+        {paymentsEnabled
+          ? "Secure checkout. Your plan activates only after payment is confirmed."
+          : "Paid plans are launching soon. Start free today."}
       </p>
     </div>
   );
