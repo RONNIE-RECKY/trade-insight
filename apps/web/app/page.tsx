@@ -91,6 +91,16 @@ function ProductMockup() {
 
 const FEATURES = [
   {
+    title: "AI Market Analysis",
+    body: "Real-time multi-strategy analysis of Forex, gold and crypto pairs with entry, stop-loss and take-profit recommendations — six independent strategies vote, and every result shows its own real backtested hit-rate.",
+    tag: "AI",
+  },
+  {
+    title: "Chart Upload & Analysis",
+    body: "Upload any chart screenshot and our engine extracts the candles, detects patterns, reads the trend, and suggests an illustrative trade setup — no manual symbol lookup needed.",
+    tag: "IMG",
+  },
+  {
     title: "Every timeframe, 5M to 1D",
     body: "We analyze 5-minute, 15m, 30m, 1h, 4h and daily candles for every market — so you see the setup on your timeframe, not just one.",
     tag: "TF",
@@ -109,11 +119,6 @@ const FEATURES = [
     title: "Multi-timeframe confluence",
     body: "Premium signals only fire when 1h, 4h and daily agree and news sentiment doesn't contradict — higher conviction, clearly labelled.",
     tag: "MTF",
-  },
-  {
-    title: "Plain-English analysis",
-    body: "An AI-style breakdown explains why each setup fired — built strictly from the underlying indicators, patterns and headlines.",
-    tag: "AI",
   },
   {
     title: "Six strategies, one verdict",

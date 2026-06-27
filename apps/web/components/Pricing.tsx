@@ -3,15 +3,16 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { checkout, getPlans, type Plan } from "@/lib/api";
+import { checkout, getPlans, PLAN_RANK, scheduleChange, type Plan } from "@/lib/api";
 
-export function Pricing() {
+export function Pricing({ onChanged }: { onChanged?: () => void } = {}) {
   const { data: session } = useSession();
   const router = useRouter();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [paymentsEnabled, setPaymentsEnabled] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
   const currentPlan = (session?.user as { plan?: string } | undefined)?.plan ?? null;
   const userId = session?.user ? Number((session.user as { id?: string }).id) : null;
@@ -27,21 +28,45 @@ export function Pricing() {
 
   async function choose(planId: string) {
     setError(null);
-    if (planId === "free") {
-      router.push(userId ? "/account" : "/signup");
-      return;
-    }
+    setInfo(null);
     if (!userId) {
-      // must have an account to pay
-      router.push("/signup");
+      // must have an account first
+      router.push(planId === "free" ? "/signup" : `/signup?plan=${planId}`);
       return;
     }
-    if (!paymentsEnabled) return; // button is disabled in this state
+
+    const currentRank = PLAN_RANK[currentPlan ?? "free"] ?? 0;
+    const targetRank = PLAN_RANK[planId] ?? 0;
+
+    if (targetRank > currentRank) {
+      // upgrade — takes effect immediately, only after real payment
+      if (!paymentsEnabled) return; // button is disabled in this state
+      setBusy(planId);
+      try {
+        const { url } = await checkout(userId, planId);
+        window.location.href = url;
+      } catch (e) {
+        setError(String(e).replace("Error:", "").trim());
+      } finally {
+        setBusy(null);
+      }
+      return;
+    }
+
+    // downgrade (or cancel to free) — scheduled for the end of the current period
     setBusy(planId);
     try {
-      // Plan is granted only by Stripe's webhook after payment — never here.
-      const { url } = await checkout(userId, planId);
-      window.location.href = url;
+      const res = await scheduleChange(userId, planId);
+      if (res.effective === "immediately") {
+        setInfo(`Switched to ${planId === "free" ? "Free" : planId} immediately.`);
+      } else {
+        setInfo(
+          `Your plan will change to ${plans.find((p) => p.id === planId)?.name ?? planId} at the end of your ` +
+            `current billing period${res.effective ? ` (${res.effective.slice(0, 10)})` : ""}. You keep your ` +
+            `current features until then.`
+        );
+      }
+      onChanged?.();
     } catch (e) {
       setError(String(e).replace("Error:", "").trim());
     } finally {
@@ -52,9 +77,13 @@ export function Pricing() {
   return (
     <div>
       {error && <p className="text-rose-400 text-sm mb-3">{error}</p>}
+      {info && <p className="text-emerald-400 text-sm mb-3">{info}</p>}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {plans.map((plan) => {
           const isCurrent = currentPlan === plan.id;
+          const currentRank = PLAN_RANK[currentPlan ?? "free"] ?? 0;
+          const targetRank = PLAN_RANK[plan.id] ?? 0;
+          const isDowngrade = !isCurrent && userId != null && targetRank < currentRank;
           return (
             <div
               key={plan.id}
@@ -91,7 +120,7 @@ export function Pricing() {
                 ))}
               </ul>
               {(() => {
-                const paidLocked = plan.price > 0 && !paymentsEnabled;
+                const paidLocked = plan.price > 0 && !paymentsEnabled && !isDowngrade;
                 return (
                   <button
                     onClick={() => choose(plan.id)}
@@ -104,10 +133,14 @@ export function Pricing() {
                   >
                     {isCurrent
                       ? "Current plan"
+                      : busy === plan.id
+                      ? "Working…"
+                      : isDowngrade
+                      ? plan.id === "free"
+                        ? "Cancel to Free"
+                        : "Downgrade"
                       : paidLocked
                       ? "Coming soon"
-                      : busy === plan.id
-                      ? "Redirecting…"
                       : plan.price === 0
                       ? "Get started"
                       : "Upgrade"}

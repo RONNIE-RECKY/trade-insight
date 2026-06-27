@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
-import { getApiKey, getPlans, hasApiAccess, type Plan } from "@/lib/api";
+import { cancelScheduledChange, getApiKey, getPlanStatus, getPlans, hasApiAccess, type Plan, type PlanStatus } from "@/lib/api";
 import { Pricing } from "@/components/Pricing";
 
 export default function AccountPage() {
@@ -13,10 +13,32 @@ export default function AccountPage() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [apiBusy, setApiBusy] = useState(false);
+  const [planStatus, setPlanStatus] = useState<PlanStatus | null>(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
 
   useEffect(() => {
     getPlans().then((res) => setPlans(res.plans)).catch(() => {});
   }, []);
+
+  const refreshPlanStatus = () => {
+    if (userId) getPlanStatus(userId).then(setPlanStatus).catch(() => {});
+  };
+
+  useEffect(() => {
+    refreshPlanStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
+  async function undoScheduledChange() {
+    if (!userId) return;
+    setCancelBusy(true);
+    try {
+      await cancelScheduledChange(userId);
+      refreshPlanStatus();
+    } finally {
+      setCancelBusy(false);
+    }
+  }
 
   async function revealApiKey() {
     if (!userId) return;
@@ -71,6 +93,23 @@ export default function AccountPage() {
             </ul>
           </>
         )}
+        {planStatus?.pending_plan && (
+          <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+            <p>
+              Scheduled change: your plan will switch to{" "}
+              <span className="font-semibold capitalize">{planStatus.pending_plan}</span>
+              {planStatus.plan_period_end ? ` on ${planStatus.plan_period_end.slice(0, 10)}` : ""}. You keep
+              your current features until then.
+            </p>
+            <button
+              onClick={undoScheduledChange}
+              disabled={cancelBusy}
+              className="mt-2 rounded-md border border-amber-400/40 px-3 py-1 text-amber-100 hover:bg-amber-500/10 disabled:opacity-50"
+            >
+              {cancelBusy ? "Working…" : "Keep current plan instead"}
+            </button>
+          </div>
+        )}
       </div>
 
       {hasApiAccess(plan) && (
@@ -102,8 +141,11 @@ export default function AccountPage() {
 
       <div>
         <h2 className="text-lg font-semibold text-neutral-100 mb-1">Change package</h2>
-        <p className="text-sm text-neutral-500 mb-5">Upgrade or switch your plan at any time.</p>
-        <Pricing />
+        <p className="text-sm text-neutral-500 mb-5">
+          Upgrade anytime — it applies immediately. Downgrading or cancelling takes effect at the end of your
+          current billing period, so you keep your current features until then.
+        </p>
+        <Pricing onChanged={refreshPlanStatus} />
       </div>
     </div>
   );

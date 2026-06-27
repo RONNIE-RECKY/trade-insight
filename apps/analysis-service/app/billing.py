@@ -39,6 +39,7 @@ PLANS = {
             "watchlist_limit": 1,
             "api_access": False,
             "auto_trade": False,
+            "monthly_chart_uploads": 0,
         },
     },
     "pro": {
@@ -55,6 +56,7 @@ PLANS = {
             "Entry / stop / take-profit on every setup",
             "Export analysis & patterns (CSV/JSON)",
             "Unlimited watchlist",
+            "10 chart uploads / month — AI pattern detection",
         ],
         "capabilities": {
             "max_daily_signals": 10,
@@ -66,6 +68,7 @@ PLANS = {
             "watchlist_limit": None,
             "api_access": False,
             "auto_trade": False,
+            "monthly_chart_uploads": 10,
         },
     },
     "ultimate": {
@@ -84,6 +87,7 @@ PLANS = {
             "6-strategy consensus + news filtering",
             "Automated bot — connect a demo account for live execution",
             "Full backtest history per rule",
+            "50 chart uploads / month — AI pattern detection",
         ],
         "capabilities": {
             "max_daily_signals": 40,
@@ -95,6 +99,7 @@ PLANS = {
             "watchlist_limit": None,
             "api_access": False,
             "auto_trade": True,
+            "monthly_chart_uploads": 50,
         },
     },
     "platinum": {
@@ -111,6 +116,7 @@ PLANS = {
             "Programmatic API access to signals & exports",
             "Early access to new strategies",
             "Priority support",
+            "Unlimited chart uploads — AI pattern detection",
         ],
         "capabilities": {
             "max_daily_signals": None,   # unlimited
@@ -122,6 +128,7 @@ PLANS = {
             "watchlist_limit": None,
             "api_access": True,
             "auto_trade": True,
+            "monthly_chart_uploads": None,  # unlimited
         },
     },
 }
@@ -131,16 +138,82 @@ def capabilities(plan: str) -> dict:
     return PLANS.get(plan, PLANS["free"])["capabilities"]
 
 
+def check_and_consume_upload_quota(user_id: int) -> dict:
+    """Enforce the plan's monthly chart-upload quota (rolling 30-day window).
+    Raises 403 if the plan doesn't include uploads or the quota is used up;
+    otherwise increments usage and returns the remaining count."""
+    plan = user_plan(user_id)
+    quota = capabilities(plan).get("monthly_chart_uploads", 0)
+    if quota == 0:
+        raise HTTPException(status_code=403, detail="chart uploads require a paid plan (Pro and above)")
+
+    with db_session() as conn:
+        row = conn.execute(
+            "SELECT monthly_uploads_used, uploads_reset_at FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="user not found")
+
+        now = _now_str()
+        used, reset_at = row["monthly_uploads_used"], row["uploads_reset_at"]
+        if not reset_at or reset_at <= now:
+            # new rolling window
+            used = 0
+            from datetime import datetime, timedelta, timezone
+
+            reset_at = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+
+        if quota is not None and used >= quota:
+            raise HTTPException(
+                status_code=403,
+                detail=f"monthly chart-upload limit reached ({quota}) — upgrade for more, or wait until {reset_at[:10]}",
+            )
+
+        used += 1
+        conn.execute(
+            "UPDATE users SET monthly_uploads_used = ?, uploads_reset_at = ? WHERE id = ?",
+            (used, reset_at, user_id),
+        )
+
+    remaining = None if quota is None else max(0, quota - used)
+    return {"remaining": remaining, "quota": quota}
+
+
+def _apply_due_plan_change(conn, row) -> str:
+    """If a scheduled downgrade/cancel is due (period end has passed), apply it
+    now and return the resulting plan. Lazy — checked whenever the plan is read,
+    so no separate cron job is required for correctness."""
+    if not row["pending_plan"] or not row["plan_period_end"]:
+        return row["plan"]
+    if row["plan_period_end"] > _now_str():
+        return row["plan"]
+    new_plan = row["pending_plan"]
+    conn.execute(
+        "UPDATE users SET plan = ?, pending_plan = NULL, plan_period_end = NULL WHERE id = ?",
+        (new_plan, row["id"]),
+    )
+    return new_plan
+
+
+def _now_str() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def user_plan(user_id: int | None) -> str:
     """Resolve a user's plan from the DB; unauthenticated/unknown -> free.
     Admins always get full (platinum) access regardless of stored plan."""
     if user_id is None:
         return "free"
     with db_session() as conn:
-        row = conn.execute("SELECT plan, is_admin FROM users WHERE id = ?", (user_id,)).fetchone()
-    if not row:
-        return "free"
-    return "platinum" if row["is_admin"] else row["plan"]
+        row = conn.execute(
+            "SELECT id, plan, is_admin, pending_plan, plan_period_end FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        if not row:
+            return "free"
+        plan = _apply_due_plan_change(conn, row)
+    return "platinum" if row["is_admin"] else plan
 
 
 import os
@@ -171,8 +244,22 @@ def _is_admin(user_id: int | None) -> bool:
 
 
 def _set_plan(user_id: int, plan: str) -> None:
+    """Grant a plan immediately (used after payment, or by an admin). Sets a
+    30-day period for paid plans and clears any pending scheduled change."""
     with db_session() as conn:
-        conn.execute("UPDATE users SET plan = ? WHERE id = ?", (plan, user_id))
+        if plan == "free":
+            conn.execute(
+                "UPDATE users SET plan = ?, pending_plan = NULL, plan_period_end = NULL WHERE id = ?",
+                (plan, user_id),
+            )
+        else:
+            from datetime import datetime, timedelta, timezone
+
+            period_end = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+            conn.execute(
+                "UPDATE users SET plan = ?, pending_plan = NULL, plan_period_end = ? WHERE id = ?",
+                (plan, period_end, user_id),
+            )
 
 
 @router.get("/plans")
@@ -250,6 +337,68 @@ def get_api_key(x_user_id: int | None = Header(default=None)):
             key = "ph_" + secrets.token_urlsafe(24)
             conn.execute("UPDATE users SET api_key = ? WHERE id = ?", (key, x_user_id))
     return {"api_key": key}
+
+
+@router.get("/status")
+def plan_status(x_user_id: int | None = Header(default=None)):
+    """Current plan + any scheduled downgrade/cancellation for the logged-in user."""
+    if x_user_id is None:
+        raise HTTPException(status_code=401, detail="login required")
+    with db_session() as conn:
+        row = conn.execute(
+            "SELECT id, plan, is_admin, pending_plan, plan_period_end FROM users WHERE id = ?", (x_user_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="user not found")
+        plan = _apply_due_plan_change(conn, row)
+    return {
+        "plan": "platinum" if row["is_admin"] else plan,
+        "pending_plan": row["pending_plan"] if plan == row["plan"] else None,
+        "plan_period_end": row["plan_period_end"] if plan == row["plan"] else None,
+    }
+
+
+class ScheduleChangeRequest(BaseModel):
+    user_id: int
+    plan: str
+
+
+@router.post("/schedule-change")
+def schedule_change(req: ScheduleChangeRequest, x_user_id: int | None = Header(default=None)):
+    """Schedule a downgrade or cancellation to take effect at the end of the
+    current paid period — the user keeps their current plan's features until
+    then, no early loss of access, no immediate refund/proration logic needed.
+    Upgrades must go through /checkout instead (they take effect immediately)."""
+    if x_user_id is None or (x_user_id != req.user_id and not _is_admin(x_user_id)):
+        raise HTTPException(status_code=403, detail="you can only change your own plan")
+    if req.plan not in PLANS:
+        raise HTTPException(status_code=400, detail=f"unknown plan '{req.plan}'")
+
+    with db_session() as conn:
+        row = conn.execute("SELECT plan, plan_period_end FROM users WHERE id = ?", (req.user_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="user not found")
+        current_rank = PLANS.get(row["plan"], PLANS["free"])["rank"]
+        target_rank = PLANS[req.plan]["rank"]
+        if target_rank > current_rank:
+            raise HTTPException(status_code=400, detail="upgrades take effect immediately — use checkout instead")
+        if not row["plan_period_end"]:
+            # already free / nothing paid to schedule a change against
+            conn.execute("UPDATE users SET plan = 'free', pending_plan = NULL WHERE id = ?", (req.user_id,))
+            return {"ok": True, "plan": "free", "effective": "immediately"}
+        conn.execute("UPDATE users SET pending_plan = ? WHERE id = ?", (req.plan, req.user_id))
+        effective = row["plan_period_end"]
+    return {"ok": True, "pending_plan": req.plan, "effective": effective}
+
+
+@router.post("/cancel-scheduled-change")
+def cancel_scheduled_change(req: ScheduleChangeRequest, x_user_id: int | None = Header(default=None)):
+    """Undo a scheduled downgrade/cancellation — stay on the current plan."""
+    if x_user_id is None or (x_user_id != req.user_id and not _is_admin(x_user_id)):
+        raise HTTPException(status_code=403, detail="you can only change your own plan")
+    with db_session() as conn:
+        conn.execute("UPDATE users SET pending_plan = NULL WHERE id = ?", (req.user_id,))
+    return {"ok": True}
 
 
 @router.post("/subscribe")

@@ -65,7 +65,15 @@ export function Footer() {
             Trading carries risk of loss. Signals and analysis are informational only, generated from
             public technical-analysis rules, and are not financial advice or a guarantee of returns.
           </p>
-          <p className="mt-2">© {new Date().getFullYear()} PIP HIVE. Not financial advice.</p>
+          <p className="mt-2 flex flex-wrap items-center gap-3">
+            <span>© {new Date().getFullYear()} PIP HIVE. Not financial advice.</span>
+            <Link href="/terms" className="underline underline-offset-2 hover:text-neutral-400">
+              Terms of Service
+            </Link>
+            <Link href="/privacy" className="underline underline-offset-2 hover:text-neutral-400">
+              Privacy Policy
+            </Link>
+          </p>
         </div>
       </div>
     </footer>

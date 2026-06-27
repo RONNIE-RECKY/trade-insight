@@ -14,9 +14,16 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     is_admin INTEGER NOT NULL DEFAULT 0,
     plan TEXT NOT NULL DEFAULT 'free',
+    pending_plan TEXT,                  -- downgrade/cancel scheduled for period end
+    plan_period_end TEXT,               -- when the current paid plan's period ends
     verified INTEGER NOT NULL DEFAULT 0,
     verification_token TEXT,
     api_key TEXT,
+    full_name TEXT,
+    phone TEXT,
+    terms_accepted_at TEXT,
+    monthly_uploads_used INTEGER NOT NULL DEFAULT 0,
+    uploads_reset_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -137,6 +144,13 @@ _MIGRATIONS = [
     ("auto_trades", "venue", "TEXT NOT NULL DEFAULT 'simulated'"),
     ("auto_trades", "broker_ref", "TEXT"),
     ("auto_trades", "learned", "INTEGER NOT NULL DEFAULT 0"),
+    ("users", "pending_plan", "TEXT"),
+    ("users", "plan_period_end", "TEXT"),
+    ("users", "full_name", "TEXT"),
+    ("users", "phone", "TEXT"),
+    ("users", "terms_accepted_at", "TEXT"),
+    ("users", "monthly_uploads_used", "INTEGER NOT NULL DEFAULT 0"),
+    ("users", "uploads_reset_at", "TEXT"),
 ]
 
 

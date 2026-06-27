@@ -10,6 +10,7 @@ from .admin import router as admin_router
 from .auth import router as auth_router
 from .auto_trade import router as auto_trade_router
 from .billing import capabilities, router as billing_router, user_plan
+from .chart_upload import router as chart_upload_router
 from .backtest import run_backtest
 from .data_feed import get_candles
 from .db import init_db
@@ -90,6 +91,7 @@ app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(billing_router)
 app.include_router(auto_trade_router)
+app.include_router(chart_upload_router)
 
 
 @app.get("/symbols")

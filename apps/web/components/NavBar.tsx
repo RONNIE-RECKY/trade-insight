@@ -40,6 +40,7 @@ export function NavBar() {
       <NavLink href="/charts" onClick={onClick}>Charts</NavLink>
       <NavLink href="/signals" onClick={onClick}>Signals</NavLink>
       <NavLink href="/auto-trade" onClick={onClick}>Auto-Trade</NavLink>
+      <NavLink href="/upload" onClick={onClick}>Upload</NavLink>
       <NavLink href="/watchlist" onClick={onClick}>Watchlist</NavLink>
       <NavLink href="/pricing" onClick={onClick}>Pricing</NavLink>
       {isAdmin && <NavLink href="/orso" onClick={onClick}>Admin</NavLink>}

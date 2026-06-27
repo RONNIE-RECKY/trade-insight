@@ -96,6 +96,9 @@ def verify_password(password: str, stored: str) -> bool:
 class SignupRequest(BaseModel):
     email: str
     password: str
+    full_name: str
+    phone: str
+    terms_accepted: bool
 
 
 class LoginRequest(BaseModel):
@@ -119,6 +122,13 @@ class ResendRequest(BaseModel):
 
 @router.post("/auth/signup")
 def signup(req: SignupRequest):
+    if not req.terms_accepted:
+        raise HTTPException(status_code=400, detail="you must accept the Terms of Service and Privacy Policy")
+    if not req.full_name.strip():
+        raise HTTPException(status_code=400, detail="full name is required")
+    if not req.phone.strip():
+        raise HTTPException(status_code=400, detail="phone number is required")
+
     with db_session() as conn:
         existing = conn.execute("SELECT id FROM users WHERE email = ?", (req.email,)).fetchone()
         if existing:
@@ -129,9 +139,18 @@ def signup(req: SignupRequest):
         code = _new_code()
         verified = 1 if is_admin else 0  # first admin is auto-verified
         cur = conn.execute(
-            "INSERT INTO users (email, password_hash, is_admin, plan, verified, verification_token) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (req.email, hash_password(req.password), is_admin, plan, verified, None if verified else code),
+            "INSERT INTO users (email, password_hash, is_admin, plan, verified, verification_token, "
+            "full_name, phone, terms_accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+            (
+                req.email,
+                hash_password(req.password),
+                is_admin,
+                plan,
+                verified,
+                None if verified else code,
+                req.full_name.strip(),
+                req.phone.strip(),
+            ),
         )
 
     response = {"id": cur.lastrowid, "email": req.email, "is_admin": bool(is_admin), "plan": plan, "verified": bool(verified)}
@@ -180,7 +199,9 @@ def resend_code(req: ResendRequest):
 def login(req: LoginRequest):
     with db_session() as conn:
         row = conn.execute(
-            "SELECT id, email, password_hash, is_admin, plan, verified FROM users WHERE email = ?", (req.email,)
+            "SELECT id, email, password_hash, is_admin, plan, verified, full_name, pending_plan "
+            "FROM users WHERE email = ?",
+            (req.email,),
         ).fetchone()
     if not row or not verify_password(req.password, row["password_hash"]):
         raise HTTPException(status_code=401, detail="invalid email or password")
@@ -191,6 +212,8 @@ def login(req: LoginRequest):
         "email": row["email"],
         "is_admin": bool(row["is_admin"]),
         "plan": row["plan"],
+        "full_name": row["full_name"],
+        "pending_plan": row["pending_plan"],
         "verified": True,
     }
 

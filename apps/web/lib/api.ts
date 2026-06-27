@@ -240,6 +240,48 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export type ChartUploadResult = {
+  candle_count: number;
+  direction: string;
+  confluence_score: number;
+  strategies: StrategyVote[];
+  strategy_agreement: string;
+  patterns: Pattern[];
+  levels: TradeLevels | null;
+  current_position: CurrentPosition;
+  upload_quota: { remaining: number | null; quota: number | null };
+  extraction_note: string;
+  price_units: string;
+};
+
+export async function uploadChart(userId: number, file: File): Promise<ChartUploadResult> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE_URL}/charts/upload`, {
+    method: "POST",
+    headers: { "X-User-Id": String(userId) }, // no Content-Type — browser sets the multipart boundary
+    body: form,
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    let detail = body;
+    try {
+      detail = JSON.parse(body).detail ?? body;
+    } catch {
+      /* not json */
+    }
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+export type UploadQuotaStatus = { quota: number | null; used: number; remaining: number | null; reset_at: string | null };
+
+export function getUploadQuota(userId: number) {
+  return apiFetch<UploadQuotaStatus>("/charts/upload-quota", userHeaders(userId));
+}
+
 export function listSymbols() {
   return apiFetch<{ symbols: string[]; data_source: string }>("/symbols");
 }
@@ -299,13 +341,26 @@ export function resendCode(email: string) {
 }
 
 export function login(email: string, password: string) {
-  return apiFetch<{ id: number; email: string; is_admin: boolean; plan: string }>("/auth/login", {
+  return apiFetch<{
+    id: number;
+    email: string;
+    is_admin: boolean;
+    plan: string;
+    full_name?: string | null;
+    pending_plan?: string | null;
+  }>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
 }
 
-export function signup(email: string, password: string) {
+export function signup(
+  email: string,
+  password: string,
+  fullName: string,
+  phone: string,
+  termsAccepted: boolean
+) {
   return apiFetch<{
     id: number;
     email: string;
@@ -316,7 +371,7 @@ export function signup(email: string, password: string) {
     email_sent?: boolean;
   }>("/auth/signup", {
     method: "POST",
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, full_name: fullName, phone, terms_accepted: termsAccepted }),
   });
 }
 
@@ -337,6 +392,34 @@ export function adminSetPlan(adminUserId: number, targetUserId: number, plan: st
     method: "POST",
     headers: { "X-User-Id": String(adminUserId) },
     body: JSON.stringify({ user_id: targetUserId, plan }),
+  });
+}
+
+export type PlanStatus = { plan: string; pending_plan: string | null; plan_period_end: string | null };
+
+export function getPlanStatus(userId: number) {
+  return apiFetch<PlanStatus>("/billing/status", userHeaders(userId));
+}
+
+// Schedule a downgrade/cancellation for the END of the current paid period —
+// the user keeps their current plan's features until then. Upgrades should
+// go through checkout() instead (those apply immediately).
+export function scheduleChange(userId: number, plan: string) {
+  return apiFetch<{ ok: boolean; pending_plan?: string; effective?: string; plan?: string }>(
+    "/billing/schedule-change",
+    {
+      method: "POST",
+      headers: { "X-User-Id": String(userId) },
+      body: JSON.stringify({ user_id: userId, plan }),
+    }
+  );
+}
+
+export function cancelScheduledChange(userId: number) {
+  return apiFetch<{ ok: boolean }>("/billing/cancel-scheduled-change", {
+    method: "POST",
+    headers: { "X-User-Id": String(userId) },
+    body: JSON.stringify({ user_id: userId, plan: "free" }),
   });
 }
 
