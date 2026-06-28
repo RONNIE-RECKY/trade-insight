@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS users (
     terms_accepted_at TEXT,
     monthly_uploads_used INTEGER NOT NULL DEFAULT 0,
     uploads_reset_at TEXT,
+    failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+    lock_until TEXT,
+    oauth_provider TEXT,                -- e.g. 'google' if created via OAuth (no password login)
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -151,6 +154,9 @@ _MIGRATIONS = [
     ("users", "terms_accepted_at", "TEXT"),
     ("users", "monthly_uploads_used", "INTEGER NOT NULL DEFAULT 0"),
     ("users", "uploads_reset_at", "TEXT"),
+    ("users", "failed_login_attempts", "INTEGER NOT NULL DEFAULT 0"),
+    ("users", "lock_until", "TEXT"),
+    ("users", "oauth_provider", "TEXT"),
 ]
 
 

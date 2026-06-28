@@ -13,12 +13,13 @@ with their own broker and appropriate authorisation/licensing.
 from __future__ import annotations
 
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from . import broker
 from .billing import capabilities, user_plan
 from .data_feed import get_candles
 from .db import db_session
+from .security import sanitize_token_field
 
 router = APIRouter(prefix="/auto-trade")
 
@@ -229,6 +230,25 @@ class BrokerConnect(BaseModel):
     account_id: str | None = None
     token: str | None = None
     risk_acknowledged: bool = False
+
+    @field_validator("provider")
+    @classmethod
+    def _v_provider(cls, v: str) -> str:
+        if v not in ("simulated", "oanda"):
+            raise ValueError("unsupported broker provider")
+        return v
+
+    @field_validator("mode")
+    @classmethod
+    def _v_mode(cls, v: str) -> str:
+        if v not in ("demo", "live"):
+            raise ValueError("mode must be 'demo' or 'live'")
+        return v
+
+    @field_validator("account_id", "token")
+    @classmethod
+    def _v_clean(cls, v: str | None) -> str | None:
+        return sanitize_token_field(v) if v else v
 
 
 @router.get("/broker")

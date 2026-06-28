@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getPlans, resendCode, signup, verifyCode, type Plan } from "@/lib/api";
+import { GoogleSignInButton } from "@/components/GoogleSignInButton";
 
 function SignupForm() {
   const router = useRouter();
@@ -169,7 +170,7 @@ function SignupForm() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            minLength={6}
+            minLength={8}
             className="mt-1 w-full bg-neutral-950 border border-neutral-700 rounded-md px-3 py-1.5 text-sm text-neutral-100 focus:outline-none focus:ring-1 focus:ring-cyan-500"
           />
         </div>
@@ -232,6 +233,7 @@ function SignupForm() {
           {submitting ? "Creating account…" : "Sign up"}
         </button>
       </form>
+      <GoogleSignInButton />
       <p className="text-xs text-neutral-500">
         Already have an account?{" "}
         <Link href="/login" className="text-cyan-400 underline underline-offset-2">

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import { GoogleSignInButton } from "@/components/GoogleSignInButton";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -18,7 +19,7 @@ export default function LoginPage() {
     const res = await signIn("credentials", { email, password, redirect: false });
     setSubmitting(false);
     if (res?.error) {
-      setError("Invalid credentials — or your email isn't verified yet. Check your verification link.");
+      setError("Incorrect email or password — or your email isn't verified yet.");
       return;
     }
     // /account applies any plan chosen on the pricing page (pendingPlan)
@@ -58,6 +59,7 @@ export default function LoginPage() {
           {submitting ? "Logging in…" : "Log in"}
         </button>
       </form>
+      <GoogleSignInButton />
     </div>
   );
 }

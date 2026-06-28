@@ -354,6 +354,23 @@ export function login(email: string, password: string) {
   });
 }
 
+// Server-side only (called from the NextAuth signIn callback, never from the
+// browser) — bridges a trusted-provider login to our backend account model.
+export function oauthUpsert(email: string, fullName: string | null, provider: string) {
+  return apiFetch<{
+    id: number;
+    email: string;
+    is_admin: boolean;
+    plan: string;
+    full_name: string | null;
+    pending_plan: string | null;
+  }>("/auth/oauth-upsert", {
+    method: "POST",
+    headers: { "X-Internal-Secret": process.env.OAUTH_BRIDGE_SECRET ?? "" },
+    body: JSON.stringify({ email, full_name: fullName, provider }),
+  });
+}
+
 export function signup(
   email: string,
   password: string,

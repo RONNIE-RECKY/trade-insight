@@ -26,6 +26,10 @@ FINNHUB_API_KEY=            # optional
 RESEND_API_KEY=             # optional (email)
 SMTP_HOST= SMTP_USER= SMTP_PASS=   # optional (email, alternative to Resend)
 WEB_BASE_URL=https://yourapp.com   # used to build verification links
+ADMIN_EMAIL= ADMIN_PASSWORD=       # seeds the one guaranteed admin account on boot
+DB_PATH=                           # optional, override the SQLite file location
+STRIPE_SECRET_KEY= STRIPE_WEBHOOK_SECRET=  # optional, enables real checkout
+OAUTH_BRIDGE_SECRET=<random 32+ char secret>  # required if you enable Google sign-in (see below)
 ```
 
 ### Frontend environment variables
@@ -33,7 +37,17 @@ WEB_BASE_URL=https://yourapp.com   # used to build verification links
 NEXT_PUBLIC_API_BASE_URL=https://api.yourapp.com   # the analysis-service URL
 NEXTAUTH_SECRET=<random 32+ char secret>
 NEXTAUTH_URL=https://yourapp.com
+GOOGLE_CLIENT_ID=           # optional — enables "Continue with Google"
+GOOGLE_CLIENT_SECRET=       # optional
+OAUTH_BRIDGE_SECRET=<same value as the backend's OAUTH_BRIDGE_SECRET>
 ```
+
+### Trusted auth provider (Google) setup
+1. Google Cloud Console → **APIs & Services → Credentials** → Create OAuth client ID (type: Web application).
+2. Authorized redirect URI: `https://<your-web-domain>/api/auth/callback/google`.
+3. Copy the Client ID/Secret into `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` on the **frontend** service.
+4. Generate one random secret and set it as `OAUTH_BRIDGE_SECRET` on **both** the frontend and backend services — it's how the frontend's server-side NextAuth callback proves to the backend that a sign-in was genuinely verified by Google (without it, the bridge endpoint refuses every request).
+5. Leave `GOOGLE_CLIENT_ID`/`SECRET` unset and the "Continue with Google" button simply doesn't render — email/password still works standalone.
 
 ---
 
@@ -198,6 +212,14 @@ project as three components. ~20–30 minutes.
   point your registrar's DNS at the value Railway shows, then update `NEXTAUTH_URL` +
   `ALLOWED_ORIGINS` to the custom domain.
 - Keep the api service at **1 replica** so the APScheduler daily signal scan doesn't run twice.
+
+## 8. Account security (what's already implemented)
+- **Password hashing**: scrypt (memory-hard, stdlib). Any account created before this upgrade is verified against the legacy PBKDF2 hash and silently re-hashed to scrypt on its next successful login.
+- **Input validation**: every signup/login field (email, password, full name, phone, verification code) is normalized and re-validated server-side — never trusts client-side checks alone.
+- **Rate limiting**: in-memory sliding-window limits per client IP on `/auth/signup` (5/hour), `/auth/login` (10/15min), `/auth/verify-code` (10/15min), `/auth/resend-code` (3/10min), returning `429` with `Retry-After`. This state is per-process — keep the backend at 1 replica, or move it to Redis if you ever scale out.
+- **Account lockout**: 5 failed password attempts locks the account for 15 minutes (`423 Locked`), independent of the IP-based rate limit.
+- **Generic error messages**: login always returns "Incorrect email or password." for both a wrong password and a nonexistent email (plus a dummy-hash comparison on the not-found path) to reduce account enumeration via timing.
+- **Trusted OAuth provider**: Google sign-in bridges through a backend endpoint gated by a shared secret (`OAUTH_BRIDGE_SECRET`) — it can't be hit directly to mint accounts.
 
 ## 5. Honesty / compliance note
 This product presents **informational technical analysis**, not financial advice. Win-rates shown are real backtested results of each rule — never marketing figures. Keep the disclaimer banner and the "not financial advice" language in place; depending on your jurisdiction, distributing trading signals may require regulatory registration (e.g. FCA in the UK). Get legal advice before charging real customers.
