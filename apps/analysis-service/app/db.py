@@ -3,9 +3,20 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
+def _clean_env(value: str | None) -> str | None:
+    """Strip whitespace + one layer of accidentally-pasted quotes (some
+    dashboards' raw env editors store KEY="value" literally, quotes included)."""
+    if value is None:
+        return None
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        value = value[1:-1].strip()
+    return value
+
+
 # DB location. Override with DB_PATH in production (e.g. on Railway set
 # DB_PATH=/app/data/trade_insight.db and mount a volume at /app/data).
-DB_PATH = Path(os.environ.get("DB_PATH") or (Path(__file__).resolve().parents[3] / "data" / "trade_insight.db"))
+DB_PATH = Path(_clean_env(os.environ.get("DB_PATH")) or (Path(__file__).resolve().parents[3] / "data" / "trade_insight.db"))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (

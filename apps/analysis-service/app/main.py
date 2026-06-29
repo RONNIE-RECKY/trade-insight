@@ -45,13 +45,11 @@ async def lifespan(app: FastAPI):
 def _seed_admin():
     """Ensure a known admin account exists (verified, platinum) so the admin
     dashboard is always reachable. Override creds via env."""
-    import os
-
-    from .auth import hash_password
+    from .auth import _clean_env, hash_password
     from .db import db_session
 
-    email = os.environ.get("ADMIN_EMAIL", "admin@tradeinsight.app")
-    password = os.environ.get("ADMIN_PASSWORD", "Admin1234!")
+    email = _clean_env("ADMIN_EMAIL", "admin@tradeinsight.app")
+    password = _clean_env("ADMIN_PASSWORD", "Admin1234!")
     with db_session() as conn:
         row = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
         if row:
@@ -71,9 +69,19 @@ app = FastAPI(title="Trade Insight Analysis Service", lifespan=lifespan)
 
 # Allowed frontend origins. In production set ALLOWED_ORIGINS to a comma-separated
 # list of your deployed web URLs (e.g. "https://web-production.up.railway.app").
+# Stray quote characters (from pasting KEY="value" into a raw env editor) are
+# stripped per-origin so CORS doesn't silently fail to match the real Origin header.
 import os as _os
 
-_origins = [o.strip() for o in _os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+
+def _strip_quotes(s: str) -> str:
+    s = s.strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+        s = s[1:-1].strip()
+    return s
+
+
+_origins = [_strip_quotes(o) for o in _os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins or ["http://localhost:3000"],

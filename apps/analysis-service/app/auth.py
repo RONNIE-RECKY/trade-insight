@@ -33,18 +33,38 @@ router = APIRouter()
 LOCKOUT_THRESHOLD = 5
 LOCKOUT_MINUTES = 15
 
+def _clean_env(name: str, default: str | None = None) -> str | None:
+    """Read an env var and strip whitespace + one layer of accidentally-pasted
+    surrounding quotes — some dashboards' "raw editor" store KEY="value" lines
+    literally, including the quote characters, which silently breaks SMTP auth
+    and other credential checks without raising anything resembling this cause."""
+    v = os.environ.get(name, default)
+    if v is None:
+        return None
+    v = v.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"'):
+        v = v[1:-1].strip()
+    return v
+
+
 # Public base URL of the web app.
-WEB_BASE_URL = os.environ.get("WEB_BASE_URL", "http://localhost:3000")
-RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
-RESEND_FROM = os.environ.get("RESEND_FROM", "PIP HIVE <onboarding@resend.dev>")
+WEB_BASE_URL = _clean_env("WEB_BASE_URL", "http://localhost:3000")
+RESEND_API_KEY = _clean_env("RESEND_API_KEY")
+RESEND_FROM = _clean_env("RESEND_FROM", "PIP HIVE <onboarding@resend.dev>")
 # Gmail (or any SMTP): set SMTP_USER + SMTP_PASS (a Gmail App Password). SMTP_HOST
 # defaults to Gmail so for Gmail you only need USER + PASS.
-SMTP_USER = os.environ.get("SMTP_USER")
-SMTP_PASS = os.environ.get("SMTP_PASS")
-SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
-SMTP_FROM = os.environ.get("SMTP_FROM") or SMTP_USER
+SMTP_USER = _clean_env("SMTP_USER")
+SMTP_PASS = _clean_env("SMTP_PASS")
+SMTP_HOST = _clean_env("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(_clean_env("SMTP_PORT", "587"))
+SMTP_FROM = _clean_env("SMTP_FROM") or SMTP_USER
 EMAIL_CONFIGURED = bool(RESEND_API_KEY or (SMTP_USER and SMTP_PASS))
+if SMTP_USER and SMTP_PASS:
+    print(
+        f"[auth] SMTP configured: host={SMTP_HOST} port={SMTP_PORT} "
+        f"user_len={len(SMTP_USER)} pass_len={len(SMTP_PASS)}",
+        flush=True,
+    )
 # Shared secret the frontend's server-side OAuth callback must present, so the
 # OAuth bridge can't be used by anyone outside our own backend to mint accounts.
 OAUTH_BRIDGE_SECRET = os.environ.get("OAUTH_BRIDGE_SECRET")
@@ -75,8 +95,10 @@ def _send_verification_code(email: str, code: str) -> bool:
                 s.login(SMTP_USER, SMTP_PASS)
                 s.send_message(msg)
             return True
-        except Exception:  # noqa: BLE001 — fall through to other providers / on-screen code
-            pass
+        except Exception as e:  # noqa: BLE001 — fall through to other providers / on-screen code
+            # Logged (not swallowed silently) so the real cause shows up in
+            # Railway's deploy logs instead of just "email_sent: false".
+            print(f"[auth] SMTP send failed: {type(e).__name__}: {e}", flush=True)
 
     if RESEND_API_KEY:
         try:
