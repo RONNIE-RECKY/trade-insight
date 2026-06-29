@@ -1,8 +1,14 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
-pandas
+# pandas is pinned: an unpinned install resolved pandas 3.0.3 (very newly
+# released) on Railway's Linux build, which segfaults in native code on
+# boolean-mask indexing of datetime-backed columns (app/patterns.py's
+# swing-point filtering) — reproduced from the deploy crash log. pandas-ta
+# requires pandas>=2.3.2 and numpy>=2.2.6, so pin to the floor of that range
+# (the most mature, longest-tested release short of the new 3.0 line).
+pandas==2.3.2
 pandas-ta==0.4.71b0
-numpy
+numpy>=2.2.6
 httpx==0.27.2
 apscheduler==3.10.4
 python-dotenv==1.0.1
