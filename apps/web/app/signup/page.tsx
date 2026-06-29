@@ -173,6 +173,10 @@ function SignupForm() {
             minLength={8}
             className="mt-1 w-full bg-neutral-950 border border-neutral-700 rounded-md px-3 py-1.5 text-sm text-neutral-100 focus:outline-none focus:ring-1 focus:ring-cyan-500"
           />
+          <p className="mt-1 text-xs text-neutral-500">
+            8+ characters, with an uppercase letter, a lowercase letter, a number, and a symbol. Can&apos;t contain
+            your name or email.
+          </p>
         </div>
 
         {plans.length > 0 && (

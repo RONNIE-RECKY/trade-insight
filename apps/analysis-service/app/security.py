@@ -87,11 +87,30 @@ def validate_password(password: str) -> str:
         raise HTTPException(status_code=400, detail="password must be at least 8 characters")
     if len(password) > 128:
         raise HTTPException(status_code=400, detail="password is too long")
-    if not re.search(r"[A-Za-z]", password) or not re.search(r"\d", password):
-        raise HTTPException(status_code=400, detail="password must include at least one letter and one number")
+    if not re.search(r"[A-Z]", password):
+        raise HTTPException(status_code=400, detail="password must include at least one uppercase letter")
+    if not re.search(r"[a-z]", password):
+        raise HTTPException(status_code=400, detail="password must include at least one lowercase letter")
+    if not re.search(r"\d", password):
+        raise HTTPException(status_code=400, detail="password must include at least one number")
+    if not re.search(r"[^A-Za-z0-9]", password):
+        raise HTTPException(status_code=400, detail="password must include at least one special character (e.g. ! @ # $ %)")
     if password.lower() in _WEAK_PASSWORDS:
         raise HTTPException(status_code=400, detail="that password is too common — choose a stronger one")
     return password
+
+
+def password_must_be_unique_to_user(password: str, email: str, full_name: str | None) -> None:
+    """Reject passwords trivially derived from the user's own identity (their
+    email's local-part or their name) — a common, easily-guessed pattern."""
+    lowered = password.lower()
+    local_part = email.split("@", 1)[0].lower()
+    if len(local_part) >= 3 and local_part in lowered:
+        raise HTTPException(status_code=400, detail="password must not contain your email address")
+    if full_name:
+        for token in re.split(r"\s+", full_name.lower()):
+            if len(token) >= 3 and token in lowered:
+                raise HTTPException(status_code=400, detail="password must not contain your name")
 
 
 def sanitize_full_name(name: str) -> str:

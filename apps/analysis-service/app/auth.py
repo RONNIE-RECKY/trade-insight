@@ -11,7 +11,7 @@ from email.mime.text import MIMEText
 
 import httpx
 from fastapi import APIRouter, Header, HTTPException, Request
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from .db import db_session
 from .fixtures import SYMBOLS
@@ -19,6 +19,7 @@ from .security import (
     get_client_ip,
     hash_password,
     normalize_email,
+    password_must_be_unique_to_user,
     rate_limit,
     sanitize_full_name,
     sanitize_phone,
@@ -122,6 +123,11 @@ class SignupRequest(BaseModel):
     @classmethod
     def _v_phone(cls, v: str) -> str:
         return sanitize_phone(v)
+
+    @model_validator(mode="after")
+    def _v_password_not_personal(self):
+        password_must_be_unique_to_user(self.password, self.email, self.full_name)
+        return self
 
 
 class LoginRequest(BaseModel):
