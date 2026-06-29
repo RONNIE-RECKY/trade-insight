@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { canSeePremiumSignals, getSignalsHistory, getSignalsToday, isFreePlan, type Signal } from "@/lib/api";
@@ -134,7 +134,7 @@ function SignalsPageInner() {
   const [error, setError] = useState<string | null>(null);
   const [premiumOnly, setPremiumOnly] = useState(false);
 
-  useEffect(() => {
+  const loadSignals = useCallback(() => {
     // free is locked to gold (XAU/USD) — the backend enforces this too
     getSignalsToday(userId, free ? "XAUUSD" : undefined)
       .then((t) => setToday(t.signals))
@@ -147,6 +147,13 @@ function SignalsPageInner() {
       setHistory([]);
     }
   }, [userId, free]);
+
+  useEffect(() => {
+    loadSignals();
+    // keep "today's signal" feed live — refresh every 2 minutes in the background
+    const id = setInterval(loadSignals, 120_000);
+    return () => clearInterval(id);
+  }, [loadSignals]);
 
   const visibleToday = useMemo(
     () => (premiumOnly ? today.filter((s) => s.tier === "premium") : today),

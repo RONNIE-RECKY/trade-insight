@@ -25,6 +25,17 @@ const TIMEFRAMES = [
   { value: "1day", label: "1D" },
 ];
 
+// How often to auto-refresh the chart + analysis, scaled to the timeframe —
+// no point polling a daily chart every few seconds.
+const REFRESH_MS: Record<string, number> = {
+  "5min": 15_000,
+  "15min": 30_000,
+  "30min": 45_000,
+  "1h": 60_000,
+  "4h": 120_000,
+  "1day": 180_000,
+};
+
 function directionBadgeClass(direction: string) {
   if (direction === "bullish") return "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
   if (direction === "bearish") return "bg-rose-500/10 text-rose-400 border border-rose-500/20";
@@ -58,6 +69,8 @@ function ChartsPageInner() {
   const [report, setReport] = useState<FullAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [live, setLive] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   useEffect(() => {
     listSymbols()
@@ -69,23 +82,36 @@ function ChartsPageInner() {
       .catch((e) => setError(String(e)));
   }, []);
 
-  const runAnalysis = useCallback(() => {
-    if (!symbol) return;
-    setLoading(true);
-    setError(null);
-    Promise.all([getCandles(symbol, interval), analyze(symbol, interval, userId)])
-      .then(([c, r]) => {
-        setCandles(c.candles);
-        setReport(r);
-      })
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false));
-  }, [symbol, interval, userId]);
+  const runAnalysis = useCallback(
+    (silent = false) => {
+      if (!symbol) return;
+      if (!silent) setLoading(true);
+      setError(null);
+      Promise.all([getCandles(symbol, interval), analyze(symbol, interval, userId)])
+        .then(([c, r]) => {
+          setCandles(c.candles);
+          setReport(r);
+          setLastUpdated(new Date());
+        })
+        .catch((e) => setError(String(e)))
+        .finally(() => setLoading(false));
+    },
+    [symbol, interval, userId]
+  );
 
   // auto-run whenever symbol or timeframe changes
   useEffect(() => {
     runAnalysis();
   }, [runAnalysis]);
+
+  // live auto-refresh: re-poll on an interval scaled to the chosen timeframe,
+  // without flashing the "Analyzing..." loading state (silent refresh)
+  useEffect(() => {
+    if (!live || !symbol) return;
+    const ms = REFRESH_MS[interval] ?? 60_000;
+    const id = setInterval(() => runAnalysis(true), ms);
+    return () => clearInterval(id);
+  }, [live, symbol, interval, runAnalysis]);
 
   const cp = report?.current_position;
 
@@ -142,13 +168,29 @@ function ChartsPageInner() {
             })}
           </div>
           <button
-            onClick={runAnalysis}
+            onClick={() => runAnalysis()}
             disabled={loading}
             className="rounded-md bg-gradient-to-br from-cyan-500 to-emerald-500 px-4 py-1.5 text-sm font-semibold text-neutral-950 disabled:opacity-50"
           >
             {loading ? "Analyzing…" : "Analyze"}
           </button>
         </div>
+      </div>
+
+      <div className="flex items-center justify-between flex-wrap gap-2 text-xs text-neutral-500">
+        <button
+          onClick={() => setLive((v) => !v)}
+          className="flex items-center gap-1.5"
+          title={live ? "Click to pause auto-refresh" : "Click to resume auto-refresh"}
+        >
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${live ? "bg-emerald-400 animate-pulse" : "bg-neutral-600"}`}
+          />
+          <span className={live ? "text-emerald-400" : "text-neutral-500"}>
+            {live ? "Live" : "Paused"}
+          </span>
+        </button>
+        {lastUpdated && <span>Updated {lastUpdated.toLocaleTimeString()}</span>}
       </div>
 
       {/* Export */}
@@ -193,7 +235,7 @@ function ChartsPageInner() {
           <p className="font-medium">Couldn&apos;t reach the analysis service.</p>
           <p className="mt-1 text-rose-300/80">
             Make sure the backend is running, then{" "}
-            <button onClick={runAnalysis} className="underline underline-offset-2">
+            <button onClick={() => runAnalysis()} className="underline underline-offset-2">
               retry
             </button>
             .
