@@ -13,6 +13,7 @@ import {
 } from "@/lib/api";
 
 const TIMEFRAMES = [
+  { value: "", label: "Auto" },
   { value: "5min", label: "5M" },
   { value: "15min", label: "15M" },
   { value: "30min", label: "30M" },
@@ -45,8 +46,11 @@ function UploadInner() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [symbols, setSymbols] = useState<string[]>([]);
+  // empty string = "auto-detect from the image" — the symbol/timeframe selectors
+  // are an override, not a requirement, since OCR usually fills these in
   const [symbol, setSymbol] = useState<string>("");
-  const [interval_, setInterval_] = useState<string>("1day");
+  const [interval_, setInterval_] = useState<string>("");
+  const [lastFile, setLastFile] = useState<File | null>(null);
 
   const refreshQuota = useCallback(() => {
     if (userId) getUploadQuota(userId).then(setQuota).catch(() => {});
@@ -58,28 +62,38 @@ function UploadInner() {
 
   useEffect(() => {
     listSymbols()
-      .then((res) => {
-        setSymbols(res.symbols);
-        setSymbol(res.symbols[0] ?? "");
-      })
+      .then((res) => setSymbols(res.symbols))
       .catch(() => {});
   }, []);
 
-  async function handleFile(file: File) {
-    if (!userId || !symbol) return;
-    setError(null);
+  const runUpload = useCallback(
+    (file: File, overrideSymbol?: string, overrideInterval?: string) => {
+      if (!userId) return;
+      setError(null);
+      setBusy(true);
+      uploadChart(userId, file, overrideSymbol || undefined, overrideInterval || undefined)
+        .then((res) => {
+          setResult(res);
+          // reflect what was actually used (detected or overridden) in the selectors
+          setSymbol(res.symbol);
+          setInterval_(res.interval);
+          refreshQuota();
+        })
+        .catch((e) => setError(String(e)))
+        .finally(() => setBusy(false));
+    },
+    [userId, refreshQuota]
+  );
+
+  function handleFile(file: File) {
     setResult(null);
+    setLastFile(file);
     setPreview(URL.createObjectURL(file));
-    setBusy(true);
-    try {
-      const res = await uploadChart(userId, file, symbol, interval_);
-      setResult(res);
-      refreshQuota();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
+    runUpload(file, symbol, interval_);
+  }
+
+  function reanalyze() {
+    if (lastFile) runUpload(lastFile, symbol, interval_);
   }
 
   const noUploadsAtAll = quota?.quota === 0;
@@ -121,7 +135,7 @@ function UploadInner() {
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
               <label htmlFor="up-symbol" className="text-sm font-medium text-neutral-400">
-                Pair shown in screenshot
+                Pair
               </label>
               <select
                 id="up-symbol"
@@ -129,6 +143,7 @@ function UploadInner() {
                 onChange={(e) => setSymbol(e.target.value)}
                 className="bg-neutral-900 border border-neutral-700 rounded-md px-3 py-1.5 text-sm text-neutral-100 focus:outline-none focus:ring-1 focus:ring-cyan-500"
               >
+                <option value="">Auto-detect</option>
                 {symbols.map((s) => (
                   <option key={s} value={s}>
                     {s}
@@ -139,7 +154,7 @@ function UploadInner() {
             <div className="flex items-center gap-1 bg-neutral-900 border border-neutral-800 rounded-md p-1">
               {TIMEFRAMES.map((tf) => (
                 <button
-                  key={tf.value}
+                  key={tf.value || "auto"}
                   type="button"
                   onClick={() => setInterval_(tf.value)}
                   className={`text-xs font-medium px-3 py-1 rounded ${
@@ -152,11 +167,22 @@ function UploadInner() {
                 </button>
               ))}
             </div>
+            {lastFile && (
+              <button
+                type="button"
+                onClick={reanalyze}
+                disabled={busy}
+                className="text-xs font-medium px-3 py-1.5 rounded-md border border-neutral-700 text-neutral-300 hover:border-cyan-500/50 disabled:opacity-50"
+              >
+                Re-analyze with this pair/timeframe
+              </button>
+            )}
           </div>
           <p className="text-xs text-neutral-500">
-            Tell us which pair and timeframe the screenshot is of — we use that to pull the real live price and
-            run it through the same multi-strategy, news and backtest engine used everywhere else, so the trade
-            plan you get has a real, executable price (not one read off the image's pixels).
+            We read the pair, timeframe and price axis straight off the screenshot when we can — leave both on
+            &quot;Auto&quot; and just drop the image in. If detection misses or gets it wrong, pick the right pair/timeframe
+            here and hit re-analyze; either way the trade plan below is pulled from the real live price for
+            whichever pair we end up using, not numbers read off the image&apos;s pixels.
           </p>
 
           <div
@@ -197,6 +223,27 @@ function UploadInner() {
 
           {result && (
             <>
+              <div className="rounded-xl border border-neutral-800 bg-neutral-900/40 px-4 py-3 text-xs text-neutral-400">
+                {result.detected_symbol || result.detected_interval ? (
+                  <>
+                    Detected{" "}
+                    <span className="text-neutral-200 font-medium">
+                      {result.detected_symbol ?? "—"}
+                      {result.detected_interval ? `, ${result.detected_interval}` : ""}
+                    </span>{" "}
+                    from the screenshot
+                    {(result.symbol_overridden || result.interval_overridden) && (
+                      <> — using your override of {result.symbol} / {result.interval} instead.</>
+                    )}
+                    {result.calibrated && (
+                      <span className="ml-2 text-emerald-400">· price axis calibrated to real prices</span>
+                    )}
+                  </>
+                ) : (
+                  <>Couldn&apos;t detect a pair/timeframe from the screenshot — using {result.symbol} / {result.interval}.</>
+                )}
+              </div>
+
               {result.live_analysis && (
                 <div className="bg-neutral-900/60 border border-emerald-500/30 rounded-xl p-5">
                   <div className="flex items-center justify-between mb-1">

@@ -2,13 +2,16 @@
 elsewhere on the platform — pattern detection, the 6-strategy consensus, trend
 read, and illustrative trade levels. Gated by plan (Free = no uploads).
 
-The image-extracted candles (no axis OCR) only give relative, scale-invariant
-shape — pattern/trend/momentum direction is meaningful, but price levels
-derived from them are NOT the chart's real currency values. So the caller
-tells us which symbol + timeframe the screenshot is of, and we run the same
-live multi-strategy/news/backtest engine used everywhere else on the real
-current data for that pair — that result, not the image's pixel-derived
-numbers, is the one with a real, executable price.
+We try to read the pair, timeframe, and price axis straight off the image via
+OCR (chart_vision.py) — if that works, `symbol`/`interval` are optional and
+the price levels are REAL (axis-calibrated), not relative. OCR on a
+screenshot is inherently imperfect though, so the caller can always pass
+`symbol`/`interval` explicitly to override a wrong or missing detection, and
+calibration falls back to relative (scale-invariant) units if the axis labels
+weren't confidently readable. Either way, the authoritative trade plan is the
+live multi-strategy/news/backtest engine run on the real current data for
+whichever symbol/timeframe we ended up with — that's the one with a real,
+executable price.
 """
 from __future__ import annotations
 
@@ -35,15 +38,15 @@ VALID_INTERVALS = {"5min", "15min", "30min", "1h", "4h", "1day"}
 @router.post("/upload")
 async def upload_chart(
     file: UploadFile = File(...),
-    symbol: str = Form(...),
-    interval: str = Form("1day"),
+    symbol: str | None = Form(None),
+    interval: str | None = Form(None),
     x_user_id: int | None = Header(default=None),
 ):
     if x_user_id is None:
         raise HTTPException(status_code=401, detail="login required")
-    if symbol not in SYMBOLS:
+    if symbol is not None and symbol not in SYMBOLS:
         raise HTTPException(status_code=404, detail=f"unknown symbol '{symbol}', supported: {SYMBOLS}")
-    if interval not in VALID_INTERVALS:
+    if interval is not None and interval not in VALID_INTERVALS:
         raise HTTPException(status_code=400, detail=f"unsupported interval '{interval}'")
     if file.content_type not in ("image/png", "image/jpeg", "image/jpg", "image/webp"):
         raise HTTPException(status_code=400, detail="upload a PNG, JPEG or WEBP screenshot")
@@ -69,6 +72,16 @@ async def upload_chart(
             ),
         )
 
+    detected_symbol = extracted.get("detected_symbol")
+    detected_interval = extracted.get("detected_interval")
+    final_symbol = symbol or detected_symbol
+    final_interval = interval or detected_interval or "1day"
+    if not final_symbol:
+        raise HTTPException(
+            status_code=422,
+            detail="couldn't detect which pair this screenshot is of — pick it from the symbol dropdown and try again.",
+        )
+
     df = pd.DataFrame(candles)
     df["ts"] = range(len(df))  # no real timestamps from an image — sequential index
 
@@ -81,16 +94,21 @@ async def upload_chart(
     last = enriched.iloc[-1]
     close = float(last["close"])
     atr = float(last["atr_14"]) if pd.notna(last.get("atr_14")) else None
-    levels = compute_trade_levels(result["direction"], close, atr, scoring_patterns)
+    levels = compute_trade_levels(result["direction"], close, atr, scoring_patterns, result["confluence_score"])
     position = current_position(df, enriched, levels)
 
-    # the authoritative trade plan: live data for the stated symbol/timeframe,
+    # the authoritative trade plan: live data for the resolved symbol/timeframe,
     # run through the same multi-strategy + news + backtest engine as /analyze
-    live = full_analysis(symbol, interval)
+    live = full_analysis(final_symbol, final_interval)
 
     return {
-        "symbol": symbol,
-        "interval": interval,
+        "symbol": final_symbol,
+        "interval": final_interval,
+        "detected_symbol": detected_symbol,
+        "detected_interval": detected_interval,
+        "symbol_overridden": bool(symbol and detected_symbol and symbol != detected_symbol),
+        "interval_overridden": bool(interval and detected_interval and interval != detected_interval),
+        "calibrated": extracted.get("calibrated", False),
         "candle_count": len(candles),
         "direction": result["direction"],
         "confluence_score": result["confluence_score"],
@@ -101,7 +119,11 @@ async def upload_chart(
         "current_position": position,
         "upload_quota": quota,
         "extraction_note": extracted["note"],
-        "price_units": "relative (extracted from image, not the chart's real currency scale)",
+        "price_units": (
+            "real (calibrated from the image's price axis)"
+            if extracted.get("calibrated")
+            else "relative (extracted from image, not the chart's real currency scale)"
+        ),
         "live_analysis": live,
     }
 

@@ -1,0 +1,7 @@
+# Installs the Tesseract OCR engine binary that pytesseract (chart_vision.py)
+# shells out to, for chart-upload symbol/timeframe/price-axis detection.
+# Without this, OCR detection silently degrades to "not available" and the
+# upload flow falls back to manual symbol/timeframe selection + relative
+# (non-calibrated) price units — it does not break the deploy.
+[phases.setup]
+aptPkgs = ["tesseract-ocr"]

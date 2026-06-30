@@ -95,7 +95,7 @@ def full_analysis(symbol: str, interval: str) -> dict:
     close = float(last["close"]) if last is not None else None
     atr = float(last["atr_14"]) if last is not None and last.get("atr_14") == last.get("atr_14") else None
 
-    levels = compute_trade_levels(result["direction"], close, atr, scoring_patterns)
+    levels = compute_trade_levels(result["direction"], close, atr, scoring_patterns, result["confluence_score"])
     position = current_position(df, enriched, levels)
     news = get_news_sentiment(symbol)
     commentary = generate_analysis_commentary(
@@ -155,7 +155,9 @@ def predict_symbol_timeframes(symbol: str) -> list[dict]:
     predictions = []
     for tf in PREDICTION_TIMEFRAMES:
         analysis = analyze_symbol(symbol, tf)
-        levels = compute_trade_levels(analysis["direction"], analysis["close"], analysis["atr"], analysis["patterns"])
+        levels = compute_trade_levels(
+            analysis["direction"], analysis["close"], analysis["atr"], analysis["patterns"], analysis["confluence_score"]
+        )
         tier = _tier(tf, analysis["direction"], mtf, news)
         predictions.append(
             {
@@ -209,7 +211,9 @@ def run_daily_signal_scan(symbols: list[str] | None = None) -> list[dict]:
             if analysis["direction"] == "neutral" or analysis["confluence_score"] < MIN_CONFLUENCE:
                 continue
 
-            levels = compute_trade_levels(analysis["direction"], analysis["close"], analysis["atr"], analysis["patterns"])
+            levels = compute_trade_levels(
+                analysis["direction"], analysis["close"], analysis["atr"], analysis["patterns"], analysis["confluence_score"]
+            )
             if levels is None:
                 continue
 

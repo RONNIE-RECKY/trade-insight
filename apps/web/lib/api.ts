@@ -246,6 +246,11 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 export type ChartUploadResult = {
   symbol: string;
   interval: string;
+  detected_symbol: string | null;
+  detected_interval: string | null;
+  symbol_overridden: boolean;
+  interval_overridden: boolean;
+  calibrated: boolean;
   candle_count: number;
   direction: string;
   confluence_score: number;
@@ -263,13 +268,13 @@ export type ChartUploadResult = {
 export async function uploadChart(
   userId: number,
   file: File,
-  symbol: string,
-  interval: string
+  symbol?: string,
+  interval?: string
 ): Promise<ChartUploadResult> {
   const form = new FormData();
   form.append("file", file);
-  form.append("symbol", symbol);
-  form.append("interval", interval);
+  if (symbol) form.append("symbol", symbol);
+  if (interval) form.append("interval", interval);
   const res = await fetch(`${API_BASE_URL}/charts/upload`, {
     method: "POST",
     headers: { "X-User-Id": String(userId) }, // no Content-Type — browser sets the multipart boundary

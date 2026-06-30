@@ -15,3 +15,8 @@ python-dotenv==1.0.1
 stripe==10.10.0
 Pillow==10.4.0
 python-multipart==0.0.9
+# OCR for chart-upload symbol/timeframe/price-axis detection (chart_vision.py).
+# Needs the tesseract-ocr system binary too — see nixpacks.toml. Degrades
+# gracefully (falls back to manual symbol/timeframe selection + relative
+# price units) if the binary isn't present on a given deploy.
+pytesseract==0.3.13
