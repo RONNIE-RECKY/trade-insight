@@ -98,6 +98,39 @@ def fetch_yahoo_candles(symbol: str, interval: str = "1day", count: int = 300) -
     return df.to_dict(orient="records")
 
 
+def fetch_yahoo_quote(symbol: str) -> dict:
+    """Latest traded price + its timestamp, independent of candle granularity.
+
+    Candle endpoints only update once a bar closes (e.g. up to 5 minutes
+    stale on the 5min timeframe); this hits the same chart API with a tight
+    1-minute/1-day window and reads `meta.regularMarketPrice`, which Yahoo
+    updates close to real-time for FX/crypto/futures.
+    """
+    if symbol not in _YAHOO_SYMBOL:
+        raise ValueError(f"no Yahoo mapping for {symbol}")
+    y_symbol = _YAHOO_SYMBOL[symbol]
+
+    resp = httpx.get(
+        f"{_YAHOO_BASE}{y_symbol}",
+        params={"interval": "1m", "range": "1d"},
+        headers=_HEADERS,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+
+    chart = payload.get("chart", {})
+    if chart.get("error") or not chart.get("result"):
+        raise RuntimeError(f"Yahoo error for {symbol}: {chart.get('error')}")
+
+    meta = chart["result"][0].get("meta", {})
+    price = meta.get("regularMarketPrice")
+    ts = meta.get("regularMarketTime")
+    if price is None or ts is None:
+        raise RuntimeError(f"Yahoo quote missing price/time for {symbol}")
+    return {"price": float(price), "ts": pd.to_datetime(ts, unit="s", utc=True).isoformat()}
+
+
 def _resample(df: pd.DataFrame, rule: str) -> pd.DataFrame:
     s = df.set_index("ts")
     agg = s.resample(rule, label="right", closed="right").agg(

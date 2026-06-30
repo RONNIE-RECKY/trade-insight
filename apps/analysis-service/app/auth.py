@@ -5,9 +5,7 @@ from __future__ import annotations
 
 import os
 import secrets
-import smtplib
 from datetime import datetime, timedelta, timezone
-from email.mime.text import MIMEText
 
 import httpx
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -15,6 +13,7 @@ from pydantic import BaseModel, field_validator, model_validator
 
 from .db import db_session
 from .fixtures import SYMBOLS
+from .notify import send_email
 from .security import (
     get_client_ip,
     hash_password,
@@ -33,38 +32,6 @@ router = APIRouter()
 LOCKOUT_THRESHOLD = 5
 LOCKOUT_MINUTES = 15
 
-def _clean_env(name: str, default: str | None = None) -> str | None:
-    """Read an env var and strip whitespace + one layer of accidentally-pasted
-    surrounding quotes — some dashboards' "raw editor" store KEY="value" lines
-    literally, including the quote characters, which silently breaks SMTP auth
-    and other credential checks without raising anything resembling this cause."""
-    v = os.environ.get(name, default)
-    if v is None:
-        return None
-    v = v.strip()
-    if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"'):
-        v = v[1:-1].strip()
-    return v
-
-
-# Public base URL of the web app.
-WEB_BASE_URL = _clean_env("WEB_BASE_URL", "http://localhost:3000")
-RESEND_API_KEY = _clean_env("RESEND_API_KEY")
-RESEND_FROM = _clean_env("RESEND_FROM", "PIP HIVE <onboarding@resend.dev>")
-# Gmail (or any SMTP): set SMTP_USER + SMTP_PASS (a Gmail App Password). SMTP_HOST
-# defaults to Gmail so for Gmail you only need USER + PASS.
-SMTP_USER = _clean_env("SMTP_USER")
-SMTP_PASS = _clean_env("SMTP_PASS")
-SMTP_HOST = _clean_env("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(_clean_env("SMTP_PORT", "587"))
-SMTP_FROM = _clean_env("SMTP_FROM") or SMTP_USER
-EMAIL_CONFIGURED = bool(RESEND_API_KEY or (SMTP_USER and SMTP_PASS))
-if SMTP_USER and SMTP_PASS:
-    print(
-        f"[auth] SMTP configured: host={SMTP_HOST} port={SMTP_PORT} "
-        f"user_len={len(SMTP_USER)} pass_len={len(SMTP_PASS)}",
-        flush=True,
-    )
 # Shared secret the frontend's server-side OAuth callback must present, so the
 # OAuth bridge can't be used by anyone outside our own backend to mint accounts.
 OAUTH_BRIDGE_SECRET = os.environ.get("OAUTH_BRIDGE_SECRET")
@@ -84,35 +51,7 @@ def _send_verification_code(email: str, code: str) -> bool:
         "Enter it on the site to activate your account.\n\nIf you didn't request this, ignore this email."
     )
 
-    if SMTP_USER and SMTP_PASS:
-        try:
-            msg = MIMEText(body)
-            msg["Subject"] = subject
-            msg["From"] = SMTP_FROM or SMTP_USER
-            msg["To"] = email
-            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as s:
-                s.starttls()
-                s.login(SMTP_USER, SMTP_PASS)
-                s.send_message(msg)
-            return True
-        except Exception as e:  # noqa: BLE001 — fall through to other providers / on-screen code
-            # Logged (not swallowed silently) so the real cause shows up in
-            # Railway's deploy logs instead of just "email_sent: false".
-            print(f"[auth] SMTP send failed: {type(e).__name__}: {e}", flush=True)
-
-    if RESEND_API_KEY:
-        try:
-            r = httpx.post(
-                "https://api.resend.com/emails",
-                headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
-                json={"from": RESEND_FROM, "to": [email], "subject": subject, "text": body},
-                timeout=15,
-            )
-            return r.status_code < 300
-        except Exception:  # noqa: BLE001
-            pass
-
-    return False
+    return send_email(email, subject, body)
 
 
 def _new_code() -> str:

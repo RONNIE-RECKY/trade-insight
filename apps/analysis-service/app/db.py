@@ -85,10 +85,12 @@ CREATE TABLE IF NOT EXISTS auto_trade_settings (
     enabled INTEGER NOT NULL DEFAULT 0,
     max_open INTEGER NOT NULL DEFAULT 5,
     only_high_confidence INTEGER NOT NULL DEFAULT 0,
+    mt5_lot_size REAL NOT NULL DEFAULT 0.1,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Simulated positions opened automatically from signals. Purely hypothetical.
+-- Positions opened from signals: simulated/demo open automatically, live
+-- accounts require the user to confirm each trade first (see mt5_bridge.py).
 CREATE TABLE IF NOT EXISTS auto_trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -100,23 +102,29 @@ CREATE TABLE IF NOT EXISTS auto_trades (
     stop_loss REAL NOT NULL,
     take_profit REAL NOT NULL,
     status TEXT NOT NULL DEFAULT 'open',     -- open | closed
-    outcome TEXT,                            -- win | loss | open
+    outcome TEXT,                            -- win | loss | open | expired
     exit_price REAL,
     pnl_pct REAL,
-    venue TEXT NOT NULL DEFAULT 'simulated', -- simulated | demo | live-pending
-    broker_ref TEXT,                         -- broker order id when executed on a demo account
+    venue TEXT NOT NULL DEFAULT 'simulated', -- simulated | demo | mt5-demo | mt5-live
+    broker_ref TEXT,                         -- broker/EA order id once executed
+    lot_size REAL,                           -- MT5 lot size
+    delivery_status TEXT NOT NULL DEFAULT 'ready',  -- ready | sent | awaiting_confirmation | expired
+    confirm_token TEXT,                      -- one-time token for the email confirm link (mt5-live only)
+    confirm_expires_at TEXT,                 -- confirmation offer expires; unconfirmed trades are not sent to the EA
+    confirmed_at TEXT,
     learned INTEGER NOT NULL DEFAULT 0,      -- 1 once its outcome fed the learning loop
     opened_at TEXT NOT NULL DEFAULT (datetime('now')),
     closed_at TEXT
 );
 
--- A user's connected brokerage. Demo accounts get authentic auto-execution;
--- live accounts are accepted only with an explicit risk waiver and NEVER get
--- autonomous real-money execution (orders require manual per-trade confirmation).
+-- A user's connected brokerage/EA bridge. Demo accounts auto-execute with no
+-- confirmation. A live (real-money) MT5 account may only be connected with
+-- risk_acknowledged=1, and every trade on it requires the user to confirm
+-- before the EA bridge will deliver the order — see mt5_bridge.py.
 CREATE TABLE IF NOT EXISTS broker_connections (
     user_id INTEGER PRIMARY KEY,
-    provider TEXT NOT NULL DEFAULT 'simulated',  -- simulated | oanda
-    mode TEXT NOT NULL DEFAULT 'demo',           -- demo | live
+    provider TEXT NOT NULL DEFAULT 'simulated',  -- simulated | oanda | mt5
+    mode TEXT NOT NULL DEFAULT 'demo',           -- demo | live (live only supported for mt5)
     account_id TEXT,
     token TEXT,
     risk_acknowledged INTEGER NOT NULL DEFAULT 0,
@@ -168,6 +176,12 @@ _MIGRATIONS = [
     ("users", "failed_login_attempts", "INTEGER NOT NULL DEFAULT 0"),
     ("users", "lock_until", "TEXT"),
     ("users", "oauth_provider", "TEXT"),
+    ("auto_trade_settings", "mt5_lot_size", "REAL NOT NULL DEFAULT 0.1"),
+    ("auto_trades", "lot_size", "REAL"),
+    ("auto_trades", "delivery_status", "TEXT NOT NULL DEFAULT 'ready'"),
+    ("auto_trades", "confirm_token", "TEXT"),
+    ("auto_trades", "confirm_expires_at", "TEXT"),
+    ("auto_trades", "confirmed_at", "TEXT"),
 ]
 
 

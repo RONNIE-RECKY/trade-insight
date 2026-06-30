@@ -6,15 +6,21 @@ import { useSession } from "next-auth/react";
 import { RequireAuth } from "@/components/RequireAuth";
 import {
   canAutoTrade,
+  confirmMT5Trade,
   connectBroker,
+  connectMT5,
+  connectMT5Live,
+  disconnectMT5,
   getAutoTradePositions,
   getAutoTradeSettings,
   getBroker,
+  getPendingMT5Trades,
   updateAutoTradeSettings,
   type AutoTrade,
   type AutoTradePositions,
   type AutoTradeSettings,
   type BrokerConnection,
+  type PendingTrade,
 } from "@/lib/api";
 
 function dirClass(d: string) {
@@ -64,11 +70,21 @@ function AutoTradeInner() {
   const [saving, setSaving] = useState(false);
 
   // broker form state
-  const [venue, setVenue] = useState<"simulated" | "demo" | "live">("simulated");
+  const [venue, setVenue] = useState<"simulated" | "oanda" | "mt5" | "mt5-live">("simulated");
   const [acctId, setAcctId] = useState("");
   const [token, setToken] = useState("");
-  const [ack, setAck] = useState(false);
+  const [riskAck, setRiskAck] = useState(false);
   const [brokerMsg, setBrokerMsg] = useState<string | null>(null);
+  const [mt5ApiKey, setMt5ApiKey] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingTrade[]>([]);
+  const [confirmingId, setConfirmingId] = useState<number | null>(null);
+
+  const refreshPending = useCallback(() => {
+    if (!userId) return;
+    getPendingMT5Trades(userId)
+      .then((r) => setPending(r.pending))
+      .catch(() => {});
+  }, [userId]);
 
   const load = useCallback(() => {
     if (!userId || !entitled) return;
@@ -77,33 +93,73 @@ function AutoTradeInner() {
         setSettings(s);
         setPositions(p);
         setBroker(b);
-        setVenue(b.provider === "simulated" ? "simulated" : b.mode === "live" ? "live" : "demo");
+        setVenue(b.provider === "oanda" ? "oanda" : b.provider === "mt5" ? (b.mode === "live" ? "mt5-live" : "mt5") : "simulated");
+        if (b.provider === "mt5" && b.mode === "live") refreshPending();
       })
       .catch((e) => setError(String(e)));
-  }, [userId, entitled]);
+  }, [userId, entitled, refreshPending]);
 
   async function saveBroker() {
     if (!userId) return;
     setBrokerMsg(null);
     try {
+      if (venue === "mt5") {
+        const res = await connectMT5(userId, acctId || undefined);
+        setMt5ApiKey(res.api_key);
+        setBrokerMsg("MT5 demo bridge connected. Paste the API key below into your EA's inputs.");
+        const b = await getBroker(userId);
+        setBroker(b);
+        return;
+      }
+      if (venue === "mt5-live") {
+        if (!riskAck) {
+          setBrokerMsg("You must acknowledge the risk of live trading to connect a live account.");
+          return;
+        }
+        const res = await connectMT5Live(userId, acctId || undefined, riskAck);
+        setMt5ApiKey(res.api_key);
+        setBrokerMsg(
+          "MT5 LIVE bridge connected. Paste the API key below into your EA's inputs. Every signal will need " +
+            "your confirmation (in-app or via email link) before it executes — nothing fires automatically."
+        );
+        const b = await getBroker(userId);
+        setBroker(b);
+        return;
+      }
       const body =
-        venue === "simulated"
-          ? { provider: "simulated", mode: "demo" }
-          : venue === "demo"
-          ? { provider: "oanda", mode: "demo", account_id: acctId, token }
-          : { provider: "oanda", mode: "live", account_id: acctId, token, risk_acknowledged: ack };
+        venue === "simulated" ? { provider: "simulated" } : { provider: "oanda", account_id: acctId, token };
       const b = await connectBroker(userId, body);
       setBroker(b);
       setBrokerMsg(
-        venue === "live"
-          ? "Live account connected. The bot will NOT auto-place real orders — you confirm each trade yourself."
-          : venue === "demo"
+        venue === "oanda"
           ? "Demo account connected. The bot will place real orders on your practice account."
           : "Using the internal simulator."
       );
     } catch (e) {
       setBrokerMsg(String(e).replace("Error:", "").trim());
     }
+  }
+
+  async function confirmTrade(id: number) {
+    if (!userId) return;
+    setConfirmingId(id);
+    try {
+      await confirmMT5Trade(userId, id);
+      refreshPending();
+    } catch (e) {
+      setBrokerMsg(String(e).replace("Error:", "").trim());
+    } finally {
+      setConfirmingId(null);
+    }
+  }
+
+  async function disconnectMT5Bridge() {
+    if (!userId) return;
+    await disconnectMT5(userId);
+    setMt5ApiKey(null);
+    setBrokerMsg("MT5 bridge disconnected.");
+    const b = await getBroker(userId);
+    setBroker(b);
   }
 
   useEffect(() => {
@@ -151,50 +207,60 @@ function AutoTradeInner() {
       <div>
         <h1 className="text-lg font-semibold text-neutral-100">Automated trading bot</h1>
         <p className="text-xs text-neutral-500 mt-1">
-          Simulated (paper) trading. The bot auto-opens positions from your signals and tracks them against
-          live prices — <span className="text-neutral-300">no real money or broker orders are involved</span>.
+          The bot auto-opens positions from your signals. By default it uses an internal paper simulator —{" "}
+          <span className="text-neutral-300">no real money or broker orders</span>. You can optionally connect a
+          DEMO broker account (OANDA practice, or MT5 via the EA bridge) for authentic automated execution on
+          practice funds.
         </p>
       </div>
 
       <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-200">
-        This is a hypothetical simulator for education. Results don’t guarantee future performance, and the bot
-        never places real trades. Connecting a live brokerage is up to you, with your own account and authorisation.
+        Results don’t guarantee future performance. This platform only ever connects DEMO / practice broker
+        accounts for automated execution — it does not support connecting a live, real-money account here.
       </div>
 
       {error && <p className="text-rose-400 text-sm">{error}</p>}
 
-      {/* Trading account / broker connection */}
+      {/* Trading account / broker connection — DEMO accounts only */}
       <div className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-5 space-y-4">
         <div>
           <h2 className="font-medium text-neutral-100">Trading account</h2>
           <p className="text-xs text-neutral-500">
-            Connect a demo account for authentic automated execution, or a live account (with manual
-            confirmation). Currently:{" "}
+            This platform only connects DEMO / practice accounts for automated execution — never a live,
+            real-money account. Currently:{" "}
             <span className="text-neutral-300">
               {broker?.provider === "simulated" || !broker?.connected
                 ? "internal simulator"
-                : `${broker.provider} (${broker.mode})`}
+                : `${broker.provider} demo`}
             </span>
           </p>
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {(["simulated", "demo", "live"] as const).map((v) => (
+          {(["simulated", "oanda", "mt5", "mt5-live"] as const).map((v) => (
             <button
               key={v}
               onClick={() => setVenue(v)}
               className={`text-xs font-medium px-3 py-1.5 rounded-md border ${
                 venue === v
-                  ? "border-cyan-500/50 bg-cyan-500/10 text-cyan-300"
+                  ? v === "mt5-live"
+                    ? "border-amber-500/50 bg-amber-500/10 text-amber-300"
+                    : "border-cyan-500/50 bg-cyan-500/10 text-cyan-300"
                   : "border-neutral-700 text-neutral-400 hover:text-neutral-200"
               }`}
             >
-              {v === "simulated" ? "Internal simulator" : v === "demo" ? "Demo account (real execution)" : "Live account"}
+              {v === "simulated"
+                ? "Internal simulator"
+                : v === "oanda"
+                ? "OANDA demo"
+                : v === "mt5"
+                ? "MT5 demo (EA bridge)"
+                : "MT5 LIVE (confirm each trade)"}
             </button>
           ))}
         </div>
 
-        {venue !== "simulated" && (
+        {venue === "oanda" && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <input
               value={acctId}
@@ -206,40 +272,123 @@ function AutoTradeInner() {
               value={token}
               onChange={(e) => setToken(e.target.value)}
               type="password"
-              placeholder={venue === "demo" ? "Practice API token" : "Live API token"}
+              placeholder="Practice API token"
               className="bg-neutral-950 border border-neutral-700 rounded-md px-3 py-2 text-sm text-neutral-100"
             />
           </div>
         )}
 
-        {venue === "live" && (
-          <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-4 space-y-3">
-            <p className="text-sm font-semibold text-rose-200">High-risk warning — real money</p>
-            <p className="text-xs text-rose-200/90">
-              Trading real funds can cause significant losses, up to your entire balance. This software and its
-              automated analysis are <span className="font-semibold">not liable</span> for any losses. For live
-              accounts the bot does <span className="font-semibold">not</span> place orders automatically — it
-              proposes trades and <span className="font-semibold">you confirm each one yourself</span>. Only proceed
-              if you fully understand the risks and are authorised to trade.
+        {venue === "mt5" && (
+          <div className="space-y-3">
+            <p className="text-xs text-neutral-400">
+              Connect to get an API key for the PIP HIVE MT5 Expert Advisor. Install the EA on your MT5{" "}
+              <span className="text-neutral-200">demo</span> terminal, paste the key into its inputs, and it
+              will poll for and execute queued orders automatically.
             </p>
-            <label className="flex items-center gap-2 text-xs text-rose-100">
-              <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="h-4 w-4 accent-rose-500" />
-              I understand the risks and accept that the bot is not liable for any losses.
+            <input
+              value={acctId}
+              onChange={(e) => setAcctId(e.target.value)}
+              placeholder="Your MT5 demo login number (optional, for your reference)"
+              className="w-full bg-neutral-950 border border-neutral-700 rounded-md px-3 py-2 text-sm text-neutral-100"
+            />
+            {mt5ApiKey && (
+              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+                <p className="text-xs text-emerald-300 mb-1">
+                  Your EA API key (shown once — copy it now):
+                </p>
+                <code className="block break-all text-xs text-emerald-200 font-mono">{mt5ApiKey}</code>
+              </div>
+            )}
+            {broker?.provider === "mt5" && broker.connected && (
+              <button
+                onClick={disconnectMT5Bridge}
+                className="text-xs text-rose-300 underline underline-offset-2"
+              >
+                Disconnect MT5 bridge
+              </button>
+            )}
+          </div>
+        )}
+
+        {venue === "mt5-live" && (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+              This connects a real, live MT5 account with real money. The bot will still propose trades from
+              your signals, but it will <span className="font-semibold">never execute one automatically</span> —
+              you must confirm each trade yourself, either with the button below or the link sent to your email,
+              before it goes to your EA. Unconfirmed trades expire after 15 minutes and are never sent.
+            </div>
+            <input
+              value={acctId}
+              onChange={(e) => setAcctId(e.target.value)}
+              placeholder="Your MT5 live login number (optional, for your reference)"
+              className="w-full bg-neutral-950 border border-neutral-700 rounded-md px-3 py-2 text-sm text-neutral-100"
+            />
+            <label className="flex items-start gap-2 text-xs text-neutral-300">
+              <input
+                type="checkbox"
+                checked={riskAck}
+                onChange={(e) => setRiskAck(e.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-amber-500"
+              />
+              I understand this connects a live account and trades will use real money once I confirm them.
             </label>
+            {mt5ApiKey && (
+              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+                <p className="text-xs text-emerald-300 mb-1">Your EA API key (shown once — copy it now):</p>
+                <code className="block break-all text-xs text-emerald-200 font-mono">{mt5ApiKey}</code>
+              </div>
+            )}
+            {broker?.provider === "mt5" && broker.mode === "live" && broker.connected && (
+              <button onClick={disconnectMT5Bridge} className="text-xs text-rose-300 underline underline-offset-2">
+                Disconnect MT5 live bridge
+              </button>
+            )}
           </div>
         )}
 
         <div className="flex items-center gap-3">
           <button
             onClick={saveBroker}
-            disabled={venue === "live" && !ack}
             className="rounded-md bg-gradient-to-br from-cyan-500 to-emerald-500 px-4 py-2 text-sm font-semibold text-neutral-950 disabled:opacity-50"
           >
-            {venue === "simulated" ? "Use simulator" : "Connect account"}
+            {venue === "simulated"
+              ? "Use simulator"
+              : venue === "mt5" || venue === "mt5-live"
+              ? "Generate API key"
+              : "Connect account"}
           </button>
           {brokerMsg && <span className="text-xs text-neutral-400">{brokerMsg}</span>}
         </div>
       </div>
+
+      {/* Pending live-trade confirmations */}
+      {broker?.provider === "mt5" && broker.mode === "live" && pending.length > 0 && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-5 space-y-3">
+          <h2 className="font-medium text-amber-200">Trades awaiting your confirmation</h2>
+          {pending.map((t) => (
+            <div
+              key={t.id}
+              className="flex items-center justify-between bg-neutral-950/60 border border-neutral-800 rounded-lg px-3 py-2 text-sm"
+            >
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-neutral-200">{t.symbol}</span>
+                <span className={dirClass(t.direction)}>{t.direction}</span>
+                <span className="text-xs text-neutral-500 font-mono">
+                  @ {t.entry} · SL {t.stop_loss} · TP {t.take_profit}
+                </span>
+              </div>
+              <button
+                disabled={confirmingId === t.id}
+                onClick={() => confirmTrade(t.id)}
+                className="rounded-md bg-gradient-to-br from-amber-500 to-orange-500 px-3 py-1.5 text-xs font-semibold text-neutral-950 disabled:opacity-50"
+              >
+                {confirmingId === t.id ? "Confirming…" : "Confirm & Execute"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Controls */}
       {settings && (
@@ -286,6 +435,21 @@ function AutoTradeInner() {
                 className="h-4 w-4 accent-cyan-500"
               />
             </label>
+            {broker?.provider === "mt5" && broker.connected && (
+              <label className="flex items-center justify-between bg-neutral-950/60 border border-neutral-800 rounded-lg px-3 py-2 text-sm">
+                <span className="text-neutral-300">MT5 lot size</span>
+                <input
+                  type="number"
+                  min={0.01}
+                  max={100}
+                  step={0.01}
+                  value={settings.mt5_lot_size}
+                  onChange={(e) => setSettings({ ...settings, mt5_lot_size: Number(e.target.value) })}
+                  onBlur={() => save(settings)}
+                  className="w-20 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-right text-neutral-100"
+                />
+              </label>
+            )}
           </div>
         </div>
       )}

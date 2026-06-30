@@ -63,6 +63,46 @@ def fetch_live_candles(symbol: str, interval: str = "1day", outputsize: int = 30
     return candles
 
 
+def fetch_live_quote(symbol: str) -> dict:
+    key = _api_key()
+    if not key:
+        raise RuntimeError("TWELVE_DATA_API_KEY not set")
+    resp = httpx.get(
+        "https://api.twelvedata.com/price",
+        params={"symbol": symbol, "apikey": key},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    if "price" not in payload:
+        raise RuntimeError(f"Twelve Data quote error: {payload.get('message', payload)}")
+    import datetime as _dt
+
+    return {"price": float(payload["price"]), "ts": _dt.datetime.now(_dt.timezone.utc).isoformat()}
+
+
+def get_live_price(symbol: str) -> dict:
+    """Latest traded price independent of candle granularity (see yahoo_feed.fetch_yahoo_quote
+    for why candles alone can be several minutes behind the exact-moment price)."""
+    if _api_key():
+        try:
+            return {**fetch_live_quote(symbol), "source": "live"}
+        except Exception:
+            pass
+    try:
+        from . import yahoo_feed
+
+        if yahoo_feed.supports(symbol):
+            return {**yahoo_feed.fetch_yahoo_quote(symbol), "source": "live"}
+    except Exception:
+        pass
+
+    last = fixtures.generate_candles(symbol, "1day", 1)
+    if not last:
+        raise RuntimeError(f"no price available for {symbol}")
+    return {"price": last[-1]["close"], "ts": last[-1]["ts"], "source": "simulated"}
+
+
 _LAST_SOURCE = "unknown"
 
 

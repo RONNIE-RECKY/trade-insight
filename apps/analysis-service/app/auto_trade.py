@@ -121,21 +121,49 @@ def _open_from_signals(user_id: int, settings: dict) -> None:
             ).fetchall()
         }
 
+    connection = broker.get_connection(user_id)
+    is_mt5_demo = connection.get("provider") == "mt5" and connection.get("connected") and connection.get("mode") == "demo"
+    is_mt5_live = connection.get("provider") == "mt5" and connection.get("connected") and connection.get("mode") == "live"
+
     for sig in candidates:
         if open_count >= settings["max_open"]:
             break
         if sig["id"] in taken:
             continue
 
-        # Route the order to the connected venue (simulated / demo broker / live-pending).
-        routed = broker.execute_order(
-            user_id, sig["symbol"], sig["direction"], sig["stop_loss"], sig["take_profit"]
-        )
+        confirm_token = confirm_expires_at = None
+        if is_mt5_live:
+            # Real money: queue it but do NOT mark it ready for the EA poller
+            # until the user explicitly confirms (see mt5_bridge.py).
+            from .mt5_bridge import CONFIRM_WINDOW_MINUTES, new_confirm_token
+
+            confirm_token = new_confirm_token()
+            venue, broker_ref, delivery_status, lot_size = (
+                "mt5-live", None, "awaiting_confirmation", settings.get("mt5_lot_size", 0.1)
+            )
+        elif is_mt5_demo:
+            # No push API for MT5 — queue it for the polling EA to pick up and
+            # execute on the user's DEMO terminal.
+            venue, broker_ref, delivery_status, lot_size = (
+                "mt5-demo", None, "ready", settings.get("mt5_lot_size", 0.1)
+            )
+        else:
+            # simulated, or a push-capable demo broker (OANDA practice)
+            routed = broker.execute_order(
+                user_id, sig["symbol"], sig["direction"], sig["stop_loss"], sig["take_profit"]
+            )
+            venue, broker_ref, delivery_status, lot_size = (
+                routed.get("venue", "simulated"), routed.get("broker_ref"), "ready", None
+            )
+
         with db_session() as conn:
-            conn.execute(
+            cur = conn.execute(
                 "INSERT INTO auto_trades (user_id, signal_id, symbol, interval, direction, entry, "
-                "stop_loss, take_profit, status, outcome, venue, broker_ref) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', 'open', ?, ?)",
+                "stop_loss, take_profit, status, outcome, venue, broker_ref, delivery_status, lot_size, "
+                "confirm_token, confirm_expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', 'open', ?, ?, ?, ?, ?, "
+                + ("datetime('now', ?)" if is_mt5_live else "NULL")
+                + ")",
                 (
                     user_id,
                     sig["id"],
@@ -145,11 +173,21 @@ def _open_from_signals(user_id: int, settings: dict) -> None:
                     sig["entry"],
                     sig["stop_loss"],
                     sig["take_profit"],
-                    routed.get("venue", "simulated"),
-                    routed.get("broker_ref"),
+                    venue,
+                    broker_ref,
+                    delivery_status,
+                    lot_size,
+                    confirm_token,
+                    *(([f"+{CONFIRM_WINDOW_MINUTES} minutes"]) if is_mt5_live else []),
                 ),
             )
+            trade_id = cur.lastrowid
         open_count += 1
+
+        if is_mt5_live:
+            from .mt5_bridge import notify_pending_confirmation
+
+            notify_pending_confirmation(user_id, trade_id, sig, confirm_token)
 
 
 def sync(user_id: int) -> None:
@@ -194,6 +232,7 @@ class SettingsUpdate(BaseModel):
     enabled: bool
     max_open: int = 5
     only_high_confidence: bool = True
+    mt5_lot_size: float = 0.1
 
 
 @router.get("/settings")
@@ -206,13 +245,15 @@ def settings_route(x_user_id: int | None = Header(default=None)):
 def update_settings_route(req: SettingsUpdate, x_user_id: int | None = Header(default=None)):
     uid = _require_auto_trade(x_user_id)
     max_open = max(1, min(req.max_open, 50))
+    lot_size = max(0.01, min(req.mt5_lot_size, 100.0))
     with db_session() as conn:
         conn.execute(
-            "INSERT INTO auto_trade_settings (user_id, enabled, max_open, only_high_confidence, updated_at) "
-            "VALUES (?, ?, ?, ?, datetime('now')) "
+            "INSERT INTO auto_trade_settings (user_id, enabled, max_open, only_high_confidence, mt5_lot_size, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, datetime('now')) "
             "ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled, max_open=excluded.max_open, "
-            "only_high_confidence=excluded.only_high_confidence, updated_at=datetime('now')",
-            (uid, 1 if req.enabled else 0, max_open, 1 if req.only_high_confidence else 0),
+            "only_high_confidence=excluded.only_high_confidence, mt5_lot_size=excluded.mt5_lot_size, "
+            "updated_at=datetime('now')",
+            (uid, 1 if req.enabled else 0, max_open, 1 if req.only_high_confidence else 0, lot_size),
         )
     sync(uid)
     return get_settings(uid)
@@ -225,24 +266,15 @@ def positions_route(x_user_id: int | None = Header(default=None)):
 
 
 class BrokerConnect(BaseModel):
-    provider: str = "simulated"   # simulated | oanda
-    mode: str = "demo"            # demo | live
+    provider: str = "simulated"   # simulated | oanda | mt5
     account_id: str | None = None
     token: str | None = None
-    risk_acknowledged: bool = False
 
     @field_validator("provider")
     @classmethod
     def _v_provider(cls, v: str) -> str:
-        if v not in ("simulated", "oanda"):
+        if v not in ("simulated", "oanda", "mt5"):
             raise ValueError("unsupported broker provider")
-        return v
-
-    @field_validator("mode")
-    @classmethod
-    def _v_mode(cls, v: str) -> str:
-        if v not in ("demo", "live"):
-            raise ValueError("mode must be 'demo' or 'live'")
         return v
 
     @field_validator("account_id", "token")
@@ -259,11 +291,10 @@ def broker_route(x_user_id: int | None = Header(default=None)):
 
 @router.post("/broker")
 def connect_broker_route(req: BrokerConnect, x_user_id: int | None = Header(default=None)):
+    """Connect a DEMO brokerage for automated execution. This platform only
+    ever connects practice/demo accounts — never a live, real-money account."""
     uid = _require_auto_trade(x_user_id)
-    if req.provider == "oanda" and req.mode == "demo" and (not req.account_id or not req.token):
-        raise HTTPException(status_code=400, detail="demo connection needs an account id and practice token")
-    # A live (real-money) connection is only accepted with an explicit risk waiver.
-    if req.mode == "live" and not req.risk_acknowledged:
-        raise HTTPException(status_code=400, detail="live accounts require acknowledging the risk warning")
-    broker.set_connection(uid, req.provider, req.mode, req.account_id, req.token, req.risk_acknowledged)
+    if req.provider == "oanda" and (not req.account_id or not req.token):
+        raise HTTPException(status_code=400, detail="OANDA demo connection needs an account id and practice token")
+    broker.set_connection(uid, req.provider, "demo", req.account_id, req.token, False)
     return broker.get_connection(uid)

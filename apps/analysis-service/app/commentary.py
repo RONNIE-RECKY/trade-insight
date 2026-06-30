@@ -16,6 +16,39 @@ _TIMEFRAME_LABELS = {
 }
 
 
+def generate_signal_commentary(
+    symbol: str,
+    interval: str,
+    direction: str,
+    factors: list[str],
+    tier: str,
+    news_result: dict | None = None,
+) -> str:
+    """Commentary for a single STORED signal (one symbol, one timeframe, the
+    exact setup that fired). Unlike generate_commentary (which describes the
+    symbol's overall 1h/4h/1day agreement and can contradict a signal that
+    fired on a timeframe outside that set, e.g. 5min/15min/30min), this only
+    ever describes the signal it's attached to."""
+    tf_label = _TIMEFRAME_LABELS.get(interval, interval)
+    factor_text = ", ".join(f.replace("_", " ") for f in factors) or "the latest momentum read"
+    sentence = f"{symbol} is showing {direction} confluence on the {tf_label} timeframe, driven by {factor_text}."
+    if tier == "premium":
+        sentence += " The higher timeframes (1h/4h/daily) agree, and news doesn't contradict it."
+
+    if news_result and news_result.get("headlines"):
+        news_sentiment = news_result["sentiment"]
+        if news_sentiment == direction:
+            sentence += f" Recent headlines also lean {news_sentiment}, reinforcing the case."
+        elif news_sentiment == "neutral":
+            sentence += " Recent headlines are mixed/neutral, so this leans purely on the technical picture."
+        else:
+            sentence += (
+                f" Note: recent headlines actually lean {news_sentiment}, which contradicts this technical setup —"
+                " treat with extra caution."
+            )
+    return sentence
+
+
 def generate_analysis_commentary(
     symbol: str,
     interval: str,
@@ -65,38 +98,5 @@ def generate_analysis_commentary(
             sentence += f" Recent headlines also lean {ns}, reinforcing the bias."
         elif direction != "neutral" and ns not in ("neutral", direction):
             sentence += f" Note: headlines lean {ns}, against this setup — treat with caution."
-
-    return sentence
-
-
-def generate_commentary(symbol: str, mtf_result: dict, news_result: dict | None = None) -> str:
-    direction = mtf_result["direction"]
-    agreeing = [tf for tf, r in mtf_result["timeframes"].items() if r["direction"] == direction]
-    agreeing_labels = [_TIMEFRAME_LABELS.get(tf, tf) for tf in agreeing]
-
-    if direction == "neutral" or not agreeing:
-        return f"{symbol} shows no clear directional confluence across timeframes right now — sitting this one out."
-
-    factors = set()
-    for tf in agreeing:
-        factors.update(mtf_result["timeframes"][tf]["factors"])
-    factor_text = ", ".join(f.replace("_", " ") for f in sorted(factors)) or "no single standout factor"
-
-    sentence = (
-        f"{symbol} is showing {direction} confluence across the {', '.join(agreeing_labels)} "
-        f"timeframe{'s' if len(agreeing_labels) > 1 else ''}, driven by {factor_text}."
-    )
-
-    if news_result and news_result.get("headlines"):
-        news_sentiment = news_result["sentiment"]
-        if news_sentiment == direction:
-            sentence += f" Recent headlines also lean {news_sentiment}, reinforcing the case."
-        elif news_sentiment == "neutral":
-            sentence += " Recent headlines are mixed/neutral, so this leans purely on the technical picture."
-        else:
-            sentence += (
-                f" Note: recent headlines actually lean {news_sentiment}, which contradicts this technical setup —"
-                " treat with extra caution."
-            )
 
     return sentence

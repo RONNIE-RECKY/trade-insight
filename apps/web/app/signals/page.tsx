@@ -3,7 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
-import { canSeePremiumSignals, getSignalsHistory, getSignalsToday, isFreePlan, type Signal } from "@/lib/api";
+import {
+  canSeePremiumSignals,
+  getSignalOfTheDay,
+  getSignalsHistory,
+  getSignalsToday,
+  isFreePlan,
+  type Signal,
+} from "@/lib/api";
 import { RequireAuth } from "@/components/RequireAuth";
 
 function directionBadgeClass(direction: string) {
@@ -21,7 +28,17 @@ const TF_LABEL: Record<string, string> = {
   "1day": "1D",
 };
 
-function SignalCard({ signal, locked }: { signal: Signal; locked?: boolean }) {
+function SignalCard({
+  signal,
+  locked,
+  lockMessage,
+  lockCta,
+}: {
+  signal: Signal;
+  locked?: boolean;
+  lockMessage?: string;
+  lockCta?: string;
+}) {
   const isPremium = signal.tier === "premium";
   if (locked) {
     return (
@@ -43,12 +60,12 @@ function SignalCard({ signal, locked }: { signal: Signal; locked?: boolean }) {
           </span>
         </div>
         <div className="mt-6 mb-2 text-center">
-          <p className="text-sm text-neutral-300">Premium signal — entry, stop, target &amp; reasoning</p>
+          <p className="text-sm text-neutral-300">{lockMessage ?? "Premium signal — entry, stop, target & reasoning"}</p>
           <Link
             href="/pricing"
             className="mt-3 inline-block rounded-lg bg-gradient-to-br from-cyan-500 to-emerald-500 px-4 py-2 text-sm font-semibold text-neutral-950"
           >
-            Upgrade to Ultimate to unlock
+            {lockCta ?? "Upgrade to Ultimate to unlock"}
           </Link>
         </div>
       </div>
@@ -57,7 +74,9 @@ function SignalCard({ signal, locked }: { signal: Signal; locked?: boolean }) {
   return (
     <div
       className={`rounded-xl p-5 space-y-3 border ${
-        isPremium
+        signal.already_executed
+          ? "border-neutral-800 bg-neutral-900/30 opacity-60"
+          : isPremium
           ? "border-cyan-500/40 bg-gradient-to-b from-cyan-500/5 to-neutral-900/60"
           : "border-neutral-800 bg-neutral-900/60"
       }`}
@@ -73,6 +92,14 @@ function SignalCard({ signal, locked }: { signal: Signal; locked?: boolean }) {
           {isPremium && (
             <span className="text-[10px] text-cyan-300 bg-cyan-500/10 border border-cyan-500/20 rounded px-1.5 py-0.5">
               premium
+            </span>
+          )}
+          {signal.already_executed && (
+            <span
+              title="Your auto-trade bot already opened a position from this signal — it won't be reused."
+              className="text-[10px] text-neutral-400 bg-neutral-800 border border-neutral-700 rounded px-1.5 py-0.5"
+            >
+              already executed
             </span>
           )}
         </h3>
@@ -133,6 +160,8 @@ function SignalsPageInner() {
   const [history, setHistory] = useState<Signal[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [premiumOnly, setPremiumOnly] = useState(false);
+  const [sotd, setSotd] = useState<Signal | null>(null);
+  const [sotdLocked, setSotdLocked] = useState(false);
 
   const loadSignals = useCallback(() => {
     // free is locked to gold (XAU/USD) — the backend enforces this too
@@ -146,6 +175,12 @@ function SignalsPageInner() {
     } else {
       setHistory([]);
     }
+    getSignalOfTheDay(userId)
+      .then((r) => {
+        setSotd(r.signal);
+        setSotdLocked(r.locked);
+      })
+      .catch(() => {});
   }, [userId, free]);
 
   useEffect(() => {
@@ -161,9 +196,34 @@ function SignalsPageInner() {
   );
   const premiumCount = today.filter((s) => s.tier === "premium").length;
 
+  const sotdSection = sotd && (
+    <section>
+      <div className="mb-3">
+        <h2 className="text-lg font-semibold text-neutral-100 flex items-center gap-2">
+          Signal of the day
+          <span className="text-[10px] uppercase tracking-wide text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-full px-2 py-0.5">
+            best across all markets &amp; timeframes
+          </span>
+        </h2>
+        <p className="text-xs text-neutral-500 mt-1">
+          The single highest-scoring setup found today — any symbol, any timeframe — ranked by its own
+          backtested hit-rate, multi-timeframe/news agreement, and the adaptive learning weight of the
+          strategies behind it. Not a separate guess; the same honest numbers shown below, just ranked.
+        </p>
+      </div>
+      <SignalCard
+        signal={sotd}
+        locked={sotdLocked}
+        lockMessage="Signal of the Day is a paying-plan feature — entry, stop, target & reasoning"
+        lockCta="Upgrade to Pro to unlock"
+      />
+    </section>
+  );
+
   if (free) {
     return (
       <div className="space-y-6">
+        {sotdSection}
         <div>
           <h2 className="text-lg font-semibold text-neutral-100">
             Your daily gold signal <span className="text-neutral-500 font-normal">— XAU/USD</span>
@@ -195,6 +255,7 @@ function SignalsPageInner() {
 
   return (
     <div className="space-y-8">
+      {sotdSection}
       <section>
         <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
           <div>

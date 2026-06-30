@@ -2,21 +2,26 @@
 elsewhere on the platform — pattern detection, the 6-strategy consensus, trend
 read, and illustrative trade levels. Gated by plan (Free = no uploads).
 
-Honesty note carried through to the API response and the UI: because we
-extract candles from image colour (no axis OCR), price levels are relative,
-not the chart's real currency values. Trend/momentum/pattern direction is
-still meaningful because that math is scale-invariant.
+The image-extracted candles (no axis OCR) only give relative, scale-invariant
+shape — pattern/trend/momentum direction is meaningful, but price levels
+derived from them are NOT the chart's real currency values. So the caller
+tells us which symbol + timeframe the screenshot is of, and we run the same
+live multi-strategy/news/backtest engine used everywhere else on the real
+current data for that pair — that result, not the image's pixel-derived
+numbers, is the one with a real, executable price.
 """
 from __future__ import annotations
 
 import pandas as pd
-from fastapi import APIRouter, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 
 from .billing import check_and_consume_upload_quota
 from .chart_vision import extract_candles_from_image
+from .fixtures import SYMBOLS
 from .indicators import compute_indicators, latest_indicator_signals
 from .market_context import current_position
 from .patterns import detect_all_patterns, detect_patterns
+from .signal_job import full_analysis
 from .strategies import evaluate_strategies
 from .trade_levels import compute_trade_levels
 
@@ -24,12 +29,22 @@ router = APIRouter(prefix="/charts")
 
 MIN_CANDLES = 10
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024  # 8 MB
+VALID_INTERVALS = {"5min", "15min", "30min", "1h", "4h", "1day"}
 
 
 @router.post("/upload")
-async def upload_chart(file: UploadFile = File(...), x_user_id: int | None = Header(default=None)):
+async def upload_chart(
+    file: UploadFile = File(...),
+    symbol: str = Form(...),
+    interval: str = Form("1day"),
+    x_user_id: int | None = Header(default=None),
+):
     if x_user_id is None:
         raise HTTPException(status_code=401, detail="login required")
+    if symbol not in SYMBOLS:
+        raise HTTPException(status_code=404, detail=f"unknown symbol '{symbol}', supported: {SYMBOLS}")
+    if interval not in VALID_INTERVALS:
+        raise HTTPException(status_code=400, detail=f"unsupported interval '{interval}'")
     if file.content_type not in ("image/png", "image/jpeg", "image/jpg", "image/webp"):
         raise HTTPException(status_code=400, detail="upload a PNG, JPEG or WEBP screenshot")
 
@@ -69,7 +84,13 @@ async def upload_chart(file: UploadFile = File(...), x_user_id: int | None = Hea
     levels = compute_trade_levels(result["direction"], close, atr, scoring_patterns)
     position = current_position(df, enriched, levels)
 
+    # the authoritative trade plan: live data for the stated symbol/timeframe,
+    # run through the same multi-strategy + news + backtest engine as /analyze
+    live = full_analysis(symbol, interval)
+
     return {
+        "symbol": symbol,
+        "interval": interval,
         "candle_count": len(candles),
         "direction": result["direction"],
         "confluence_score": result["confluence_score"],
@@ -81,6 +102,7 @@ async def upload_chart(file: UploadFile = File(...), x_user_id: int | None = Hea
         "upload_quota": quota,
         "extraction_note": extracted["note"],
         "price_units": "relative (extracted from image, not the chart's real currency scale)",
+        "live_analysis": live,
     }
 
 

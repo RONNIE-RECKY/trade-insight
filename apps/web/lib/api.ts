@@ -47,6 +47,8 @@ export type Signal = {
   stop_loss?: number | null;
   take_profit?: number | null;
   risk_reward?: number | null;
+  composite_score?: number;
+  already_executed?: boolean;
   reasoning: {
     factors: string[];
     indicator_signals: Record<string, number | boolean>;
@@ -191,6 +193,7 @@ export type AutoTradeSettings = {
   enabled: boolean;
   max_open: number;
   only_high_confidence: boolean;
+  mt5_lot_size: number;
 };
 
 export type AutoTrade = {
@@ -241,6 +244,8 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export type ChartUploadResult = {
+  symbol: string;
+  interval: string;
   candle_count: number;
   direction: string;
   confluence_score: number;
@@ -252,11 +257,19 @@ export type ChartUploadResult = {
   upload_quota: { remaining: number | null; quota: number | null };
   extraction_note: string;
   price_units: string;
+  live_analysis: FullAnalysis;
 };
 
-export async function uploadChart(userId: number, file: File): Promise<ChartUploadResult> {
+export async function uploadChart(
+  userId: number,
+  file: File,
+  symbol: string,
+  interval: string
+): Promise<ChartUploadResult> {
   const form = new FormData();
   form.append("file", file);
+  form.append("symbol", symbol);
+  form.append("interval", interval);
   const res = await fetch(`${API_BASE_URL}/charts/upload`, {
     method: "POST",
     headers: { "X-User-Id": String(userId) }, // no Content-Type — browser sets the multipart boundary
@@ -280,6 +293,12 @@ export type UploadQuotaStatus = { quota: number | null; used: number; remaining:
 
 export function getUploadQuota(userId: number) {
   return apiFetch<UploadQuotaStatus>("/charts/upload-quota", userHeaders(userId));
+}
+
+export type LivePrice = { symbol: string; price: number; ts: string; source: string };
+
+export function getLivePrice(symbol: string) {
+  return apiFetch<LivePrice>(`/price/${encodeURIComponent(symbol)}`);
 }
 
 export function listSymbols() {
@@ -324,6 +343,13 @@ export function getSignalsToday(userId?: number | null, symbol?: string) {
 
 export function getSignalsHistory(userId?: number | null) {
   return apiFetch<{ signals: Signal[]; plan: string }>("/signals/history", userHeaders(userId));
+}
+
+export function getSignalOfTheDay(userId?: number | null) {
+  return apiFetch<{ signal: Signal | null; locked: boolean; plan: string }>(
+    "/signals/of-the-day",
+    userHeaders(userId)
+  );
 }
 
 export function verifyCode(email: string, code: string) {
@@ -469,15 +495,71 @@ export function getBroker(userId: number) {
   return apiFetch<BrokerConnection>("/auto-trade/broker", userHeaders(userId));
 }
 
-export function connectBroker(
-  userId: number,
-  body: { provider: string; mode: string; account_id?: string; token?: string; risk_acknowledged?: boolean }
-) {
+// Connects a DEMO brokerage only — this platform never connects a live,
+// real-money account for automated execution.
+export function connectBroker(userId: number, body: { provider: string; account_id?: string; token?: string }) {
   return apiFetch<BrokerConnection>("/auto-trade/broker", {
     method: "POST",
     headers: { "X-User-Id": String(userId) },
     body: JSON.stringify(body),
   });
+}
+
+export type MT5Connection = { provider: "mt5"; mode: "demo" | "live"; account_id: string | null; api_key: string };
+
+export function connectMT5(userId: number, accountId?: string) {
+  return apiFetch<MT5Connection>("/mt5/connect", {
+    method: "POST",
+    headers: { "X-User-Id": String(userId) },
+    body: JSON.stringify({ account_id: accountId ?? null }),
+  });
+}
+
+// Connects a LIVE (real-money) MT5 account. Every signal queued under this
+// connection requires the user to confirm before it executes.
+export function connectMT5Live(userId: number, accountId: string | undefined, riskAcknowledged: boolean) {
+  return apiFetch<MT5Connection>("/mt5/connect-live", {
+    method: "POST",
+    headers: { "X-User-Id": String(userId) },
+    body: JSON.stringify({ account_id: accountId ?? null, risk_acknowledged: riskAcknowledged }),
+  });
+}
+
+export function disconnectMT5(userId: number) {
+  return apiFetch<{ ok: boolean }>("/mt5/connect", {
+    method: "DELETE",
+    headers: { "X-User-Id": String(userId) },
+  });
+}
+
+export type PendingTrade = {
+  id: number;
+  symbol: string;
+  interval: string | null;
+  direction: string;
+  entry: number;
+  stop_loss: number;
+  take_profit: number;
+  confirm_expires_at: string;
+};
+
+export function getPendingMT5Trades(userId: number) {
+  return apiFetch<{ pending: PendingTrade[] }>("/mt5/pending", userHeaders(userId));
+}
+
+export function confirmMT5Trade(userId: number, tradeId: number) {
+  return apiFetch<{ ok: boolean }>(`/mt5/confirm/${tradeId}`, {
+    method: "POST",
+    headers: { "X-User-Id": String(userId) },
+  });
+}
+
+// Used by the public /confirm-trade page (the link in the confirmation
+// email) — no login required, the token itself authorizes the action.
+export async function confirmMT5TradeByToken(token: string): Promise<boolean> {
+  const res = await fetch(`${API_BASE_URL}/mt5/confirm-link/${encodeURIComponent(token)}`, { cache: "no-store" });
+  const html = await res.text();
+  return res.ok && html.includes("Trade confirmed");
 }
 
 function adminHeaders(userId: number): RequestInit {

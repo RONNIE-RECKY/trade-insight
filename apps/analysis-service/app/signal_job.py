@@ -17,7 +17,7 @@ import json
 from datetime import date
 
 from .backtest import run_backtest
-from .commentary import generate_analysis_commentary, generate_commentary
+from .commentary import generate_analysis_commentary, generate_signal_commentary
 from .data_feed import get_candles
 from .db import db_session
 from .fixtures import SYMBOLS
@@ -216,7 +216,7 @@ def run_daily_signal_scan(symbols: list[str] | None = None) -> list[dict]:
             tier = _tier(tf, analysis["direction"], mtf, news)
             df = get_candles(symbol, interval=tf, count=300, refresh=False)
             bt = run_backtest(df)
-            commentary = generate_commentary(symbol, mtf, news)
+            commentary = generate_signal_commentary(symbol, tf, analysis["direction"], analysis["factors"], tier, news)
 
             with db_session() as conn:
                 cur = conn.execute(
@@ -265,6 +265,54 @@ def get_today_signal() -> list[dict]:
             (today,),
         ).fetchall()
     return [_row_to_signal(r) for r in rows]
+
+
+def get_signal_of_the_day() -> dict | None:
+    """The single best setup across every symbol AND timeframe scanned today.
+
+    "Best" is a transparent composite — not a separate hidden model — of the
+    same honest signals already on the platform:
+      - the signal's OWN backtested hit-rate (50% weight, the dominant factor),
+      - whether it cleared the "premium" bar (multi-timeframe agreement + news
+        not contradicting, 25%),
+      - how many strategies agreed (confluence, 15%),
+      - the adaptive learning weight of the strategies that voted its direction
+        (10%) — strategies with a real track record of being right count for
+        a bit more, same mechanism as learning.py's auto-trade re-weighting.
+    No timeframe is preferred over another; a clean 5-minute setup can win
+    over a noisy daily one if its real numbers are better.
+    """
+    signals = get_today_signal()
+    if not signals:
+        signals = run_daily_signal_scan()
+
+    candidates = [s for s in signals if s["direction"] != "neutral" and s.get("entry") is not None]
+    if not candidates:
+        return None
+
+    from .learning import get_weights
+
+    weights = get_weights()
+
+    def strategy_weight_avg(sig: dict) -> float:
+        strategies = sig.get("reasoning", {}).get("strategies", [])
+        agreeing = [st for st in strategies if st.get("signal") == sig["direction"]]
+        if not agreeing:
+            return 1.0
+        vals = [weights.get(st["name"], 1.0) for st in agreeing]
+        return sum(vals) / len(vals)
+
+    def score(sig: dict) -> float:
+        hit = sig.get("backtest_hit_rate") or 0.0
+        tier_bonus = 1.0 if sig.get("tier") == "premium" else 0.0
+        confluence = min(sig.get("confluence_score", 0), 6) / 6
+        learned = strategy_weight_avg(sig) / 1.8  # normalised against learning.py's max weight
+        return hit * 0.5 + tier_bonus * 0.25 + confluence * 0.15 + learned * 0.10
+
+    best = max(candidates, key=score)
+    best = dict(best)
+    best["composite_score"] = round(score(best), 4)
+    return best
 
 
 def get_signal_history(limit: int = 60) -> list[dict]:

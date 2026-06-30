@@ -11,9 +11,11 @@ import {
   canUseIntradayBot,
   exportAnalysisUrl,
   getCandles,
+  getLivePrice,
   listSymbols,
   type Candle,
   type FullAnalysis,
+  type LivePrice,
 } from "@/lib/api";
 
 const TIMEFRAMES = [
@@ -71,6 +73,7 @@ function ChartsPageInner() {
   const [loading, setLoading] = useState(false);
   const [live, setLive] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [livePrice, setLivePrice] = useState<LivePrice | null>(null);
 
   useEffect(() => {
     listSymbols()
@@ -112,6 +115,16 @@ function ChartsPageInner() {
     const id = setInterval(() => runAnalysis(true), ms);
     return () => clearInterval(id);
   }, [live, symbol, interval, runAnalysis]);
+
+  // fast live-price ticker: polls /price every 5 s and patches the chart's
+  // last bar in place — no full candle reload, so it feels near-real-time
+  useEffect(() => {
+    if (!live || !symbol) return;
+    const fetch = () => getLivePrice(symbol).then(setLivePrice).catch(() => {});
+    fetch();
+    const id = setInterval(fetch, 5_000);
+    return () => clearInterval(id);
+  }, [live, symbol]);
 
   const cp = report?.current_position;
 
@@ -245,7 +258,21 @@ function ChartsPageInner() {
 
       {candles.length > 0 && (
         <div className="bg-neutral-900/60 border border-neutral-800 rounded-xl p-4">
-          <Chart candles={candles} patterns={report?.patterns ?? []} levels={report?.levels ?? null} />
+          {livePrice && (
+            <div className="flex items-baseline gap-2 mb-3">
+              <span className="text-2xl font-bold font-mono text-neutral-100">
+                {livePrice.price.toFixed(livePrice.price > 100 ? 2 : 5)}
+              </span>
+              <span className="text-xs text-neutral-500">{symbol}</span>
+              {livePrice.source === "live" && (
+                <span className="flex items-center gap-1 text-[10px] text-emerald-400 ml-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  live
+                </span>
+              )}
+            </div>
+          )}
+          <Chart candles={candles} patterns={report?.patterns ?? []} levels={report?.levels ?? null} livePrice={livePrice} />
         </div>
       )}
 

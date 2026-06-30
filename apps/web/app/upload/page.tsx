@@ -4,7 +4,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { RequireAuth } from "@/components/RequireAuth";
-import { getUploadQuota, uploadChart, type ChartUploadResult, type UploadQuotaStatus } from "@/lib/api";
+import {
+  getUploadQuota,
+  listSymbols,
+  uploadChart,
+  type ChartUploadResult,
+  type UploadQuotaStatus,
+} from "@/lib/api";
+
+const TIMEFRAMES = [
+  { value: "5min", label: "5M" },
+  { value: "15min", label: "15M" },
+  { value: "30min", label: "30M" },
+  { value: "1h", label: "1H" },
+  { value: "4h", label: "4H" },
+  { value: "1day", label: "1D" },
+];
 
 function directionBadgeClass(direction: string) {
   if (direction === "bullish") return "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
@@ -29,6 +44,10 @@ function UploadInner() {
   const [busy, setBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [symbols, setSymbols] = useState<string[]>([]);
+  const [symbol, setSymbol] = useState<string>("");
+  const [interval_, setInterval_] = useState<string>("1day");
+
   const refreshQuota = useCallback(() => {
     if (userId) getUploadQuota(userId).then(setQuota).catch(() => {});
   }, [userId]);
@@ -37,14 +56,23 @@ function UploadInner() {
     refreshQuota();
   }, [refreshQuota]);
 
+  useEffect(() => {
+    listSymbols()
+      .then((res) => {
+        setSymbols(res.symbols);
+        setSymbol(res.symbols[0] ?? "");
+      })
+      .catch(() => {});
+  }, []);
+
   async function handleFile(file: File) {
-    if (!userId) return;
+    if (!userId || !symbol) return;
     setError(null);
     setResult(null);
     setPreview(URL.createObjectURL(file));
     setBusy(true);
     try {
-      const res = await uploadChart(userId, file);
+      const res = await uploadChart(userId, file, symbol, interval_);
       setResult(res);
       refreshQuota();
     } catch (e) {
@@ -90,6 +118,47 @@ function UploadInner() {
         </div>
       ) : (
         <>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label htmlFor="up-symbol" className="text-sm font-medium text-neutral-400">
+                Pair shown in screenshot
+              </label>
+              <select
+                id="up-symbol"
+                value={symbol}
+                onChange={(e) => setSymbol(e.target.value)}
+                className="bg-neutral-900 border border-neutral-700 rounded-md px-3 py-1.5 text-sm text-neutral-100 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              >
+                {symbols.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-1 bg-neutral-900 border border-neutral-800 rounded-md p-1">
+              {TIMEFRAMES.map((tf) => (
+                <button
+                  key={tf.value}
+                  type="button"
+                  onClick={() => setInterval_(tf.value)}
+                  className={`text-xs font-medium px-3 py-1 rounded ${
+                    interval_ === tf.value
+                      ? "bg-cyan-500/20 text-cyan-300"
+                      : "text-neutral-400 hover:text-neutral-100"
+                  }`}
+                >
+                  {tf.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p className="text-xs text-neutral-500">
+            Tell us which pair and timeframe the screenshot is of — we use that to pull the real live price and
+            run it through the same multi-strategy, news and backtest engine used everywhere else, so the trade
+            plan you get has a real, executable price (not one read off the image's pixels).
+          </p>
+
           <div
             onClick={() => fileInputRef.current?.click()}
             onDragOver={(e) => e.preventDefault()}
@@ -128,6 +197,62 @@ function UploadInner() {
 
           {result && (
             <>
+              {result.live_analysis && (
+                <div className="bg-neutral-900/60 border border-emerald-500/30 rounded-xl p-5">
+                  <div className="flex items-center justify-between mb-1">
+                    <h2 className="font-semibold text-neutral-100">
+                      Trade to execute{" "}
+                      <span className="text-neutral-500 font-normal">
+                        ({result.live_analysis.symbol} · {result.live_analysis.interval}, live data)
+                      </span>
+                    </h2>
+                    <span
+                      className={`text-xs font-medium px-2.5 py-1 rounded-full ${directionBadgeClass(
+                        result.live_analysis.direction
+                      )}`}
+                    >
+                      {result.live_analysis.direction} · {result.live_analysis.strategy_agreement}
+                    </span>
+                  </div>
+                  <p className="text-xs text-neutral-500 mb-3">
+                    Real current price for {result.live_analysis.symbol}, run through the full multi-strategy +
+                    news + backtest engine — this is the executable plan, unlike the image-derived numbers below.
+                  </p>
+                  {result.live_analysis.commentary && (
+                    <p className="text-sm text-neutral-300 mb-3">{result.live_analysis.commentary}</p>
+                  )}
+                  {result.live_analysis.levels && result.live_analysis.direction !== "neutral" ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {[
+                        { label: "Entry", value: result.live_analysis.levels.entry, color: "text-sky-400" },
+                        { label: "Stop loss", value: result.live_analysis.levels.stop_loss, color: "text-rose-400" },
+                        { label: "Take profit", value: result.live_analysis.levels.take_profit, color: "text-emerald-400" },
+                        { label: "Risk : Reward", value: `1 : ${result.live_analysis.levels.risk_reward}`, color: "text-neutral-100" },
+                      ].map((cell) => (
+                        <div key={cell.label} className="bg-neutral-950/60 border border-neutral-800 rounded-lg p-3">
+                          <p className="text-xs text-neutral-500">{cell.label}</p>
+                          <p className={`text-base font-mono font-semibold ${cell.color}`}>{cell.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-neutral-500">
+                      No clean directional setup on {result.live_analysis.symbol} ({result.live_analysis.interval})
+                      right now — current live data doesn&apos;t support a trade plan.
+                    </p>
+                  )}
+                  {result.live_analysis.backtest_hit_rate != null && (
+                    <p className="mt-3 text-xs text-neutral-500">
+                      This exact rule&apos;s backtested hit-rate on {result.live_analysis.symbol}:{" "}
+                      <span className="text-neutral-300 font-medium">
+                        {(result.live_analysis.backtest_hit_rate * 100).toFixed(0)}%
+                      </span>{" "}
+                      over {result.live_analysis.backtest_sample_size} historical signals.
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-200">
                 {result.extraction_note}
               </div>
@@ -135,7 +260,8 @@ function UploadInner() {
               <div className="bg-neutral-900/60 border border-neutral-800 rounded-xl p-5">
                 <div className="flex items-center justify-between mb-3">
                   <h2 className="font-semibold text-neutral-100">
-                    Detected setup <span className="text-neutral-500 font-normal">({result.candle_count} candles)</span>
+                    What your screenshot shows{" "}
+                    <span className="text-neutral-500 font-normal">({result.candle_count} candles, illustrative)</span>
                   </h2>
                   <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${directionBadgeClass(result.direction)}`}>
                     {result.direction} · {result.strategy_agreement}

@@ -1,14 +1,16 @@
 """Brokerage connection + order routing.
 
-Safety model (intentional, non-negotiable):
-- "simulated"  → internal paper trades only. Default. No external calls.
-- "demo"       → real orders against a broker PRACTICE account (OANDA fxpractice).
-                 Authentic execution, but the money is fake. The bot may do this
-                 autonomously.
-- "live"       → a real-money account. We store the connection ONLY with an
-                 explicit risk waiver, and we DO NOT autonomously place orders.
-                 Live orders must be confirmed per-trade by the human. This file
-                 deliberately never auto-sends a live order.
+Safety model (intentional, non-negotiable): this platform only ever connects
+to DEMO / practice accounts for automated execution.
+- "simulated" → internal paper trades only. Default. No external calls.
+- "demo"      → real orders against a broker PRACTICE account (OANDA fxpractice,
+                or an MT5 demo account via the EA bridge in mt5_bridge.py).
+                Authentic execution, but the money is fake. The bot may do this
+                autonomously.
+
+There is intentionally no "live" (real-money) mode anywhere in this file or
+its callers. Connecting a real brokerage account for unsupervised automated
+execution is out of scope for this platform — full stop, not configurable.
 """
 from __future__ import annotations
 
@@ -67,20 +69,18 @@ def _raw_connection(user_id: int) -> dict | None:
 
 def execute_order(user_id: int, symbol: str, direction: str, stop_loss: float,
                   take_profit: float, units: int = 1000) -> dict:
-    """Route an order according to the user's broker connection.
+    """Route an order according to the user's DEMO broker connection.
 
     Returns a dict describing where the order went:
       {"venue": "simulated"}                  → caller records a paper trade
       {"venue": "demo", "broker_ref": "..."}  → real order placed on practice acct
-      {"venue": "live-pending"}               → live: NOT auto-sent, needs manual confirm
+
+    MT5 connections are NOT routed through here — MT5 has no push API, so its
+    orders are queued for the polling EA instead (see mt5_bridge.py).
     """
     raw = _raw_connection(user_id)
-    if not raw or raw["provider"] == "simulated":
+    if not raw or raw["provider"] in ("simulated", "mt5"):
         return {"venue": "simulated"}
-
-    if raw["provider"] == "oanda" and raw["mode"] == "live":
-        # Hard safety stop: never autonomously place a real-money order.
-        return {"venue": "live-pending", "reason": "live auto-execution disabled; confirm manually"}
 
     if raw["provider"] == "oanda" and raw["mode"] == "demo":
         instrument = _oanda_instrument(symbol)
