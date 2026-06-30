@@ -2,9 +2,13 @@
 //| PipHiveBridge.mq5                                                |
 //|                                                                    |
 //| Polls the PIP HIVE backend for queued signal orders and executes  |
-//| them on THIS terminal. Built for use on an MT5 DEMO account only  |
-//| — the backend never queues orders for anything but a demo/        |
-//| practice connection (see apps/analysis-service/app/broker.py).    |
+//| them on THIS terminal — works against any broker's MT5 server,    |
+//| demo or live, since it just acts on whatever account the terminal |
+//| is already logged into. On a LIVE connection, the backend queues  |
+//| orders as "awaiting confirmation" and won't return them from      |
+//| /mt5/orders until the user confirms in the web app or via the     |
+//| emailed link — this EA never sees a live order it wasn't told to  |
+//| execute by a human (see apps/analysis-service/app/mt5_bridge.py). |
 //|                                                                    |
 //| Setup (required once per terminal):                               |
 //|   Tools -> Options -> Expert Advisors -> check "Allow WebRequest  |
