@@ -324,6 +324,35 @@ def run_signal_scan_now_route():
     return {"signals": run_daily_signal_scan()}
 
 
+@app.get("/debug/test-email")
+def test_email_route(to: str = "test@example.com"):
+    """Send a test email and return diagnostics — remove before go-live."""
+    from .notify import (
+        EMAIL_CONFIGURED,
+        RESEND_API_KEY,
+        RESEND_FROM,
+        SMTP_FROM,
+        SMTP_HOST,
+        SMTP_PASS,
+        SMTP_PORT,
+        SMTP_USER,
+        send_email,
+    )
+
+    config = {
+        "smtp_user": SMTP_USER,
+        "smtp_pass_set": bool(SMTP_PASS),
+        "smtp_host": SMTP_HOST,
+        "smtp_port": SMTP_PORT,
+        "smtp_from": SMTP_FROM,
+        "resend_key_set": bool(RESEND_API_KEY),
+        "resend_from": RESEND_FROM,
+        "email_configured": EMAIL_CONFIGURED,
+    }
+    sent = send_email(to, "PIP HIVE — test email", "If you see this, email delivery is working.")
+    return {"sent": sent, "config": config}
+
+
 @app.get("/learning/stats")
 def learning_stats_route():
     """Adaptive learning: each strategy's win record + learned weight."""
