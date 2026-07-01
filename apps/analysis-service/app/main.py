@@ -263,11 +263,19 @@ def _mark_already_executed(signals: list[dict], user_id: int | None) -> list[dic
 
     with db_session() as conn:
         rows = conn.execute(
-            "SELECT DISTINCT signal_id FROM auto_trades WHERE user_id = ? AND signal_id IS NOT NULL", (user_id,)
+            "SELECT signal_id, MIN(opened_at) AS executed_at FROM auto_trades "
+            "WHERE user_id = ? AND signal_id IS NOT NULL GROUP BY signal_id",
+            (user_id,),
         ).fetchall()
-    executed = {r["signal_id"] for r in rows}
+    executed = {r["signal_id"]: r["executed_at"] for r in rows}
     for s in signals:
-        s["already_executed"] = s.get("id") in executed
+        sid = s.get("id")
+        if sid in executed:
+            s["already_executed"] = True
+            s["executed_at"] = executed[sid]
+        else:
+            s["already_executed"] = False
+            s["executed_at"] = None
     return signals
 
 

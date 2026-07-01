@@ -40,7 +40,10 @@ export function Pricing({ onChanged }: { onChanged?: () => void } = {}) {
 
     if (targetRank > currentRank) {
       // upgrade — takes effect immediately, only after real payment
-      if (!paymentsEnabled) return; // button is disabled in this state
+      if (!paymentsEnabled) {
+        setError("Payments are not yet available. Please try again shortly or contact support.");
+        return;
+      }
       setBusy(planId);
       try {
         const { url } = await checkout(userId, planId);
@@ -119,34 +122,29 @@ export function Pricing({ onChanged }: { onChanged?: () => void } = {}) {
                   </li>
                 ))}
               </ul>
-              {(() => {
-                const paidLocked = plan.price > 0 && !paymentsEnabled && !isDowngrade;
-                return (
-                  <button
-                    onClick={() => choose(plan.id)}
-                    disabled={isCurrent || busy === plan.id || paidLocked}
-                    className={`mt-6 rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-60 ${
-                      plan.popular
-                        ? "bg-gradient-to-br from-cyan-500 to-emerald-500 text-neutral-950"
-                        : "border border-neutral-700 text-neutral-100 hover:border-neutral-500"
-                    }`}
-                  >
-                    {isCurrent
-                      ? "Current plan"
-                      : busy === plan.id
-                      ? "Working…"
-                      : isDowngrade
-                      ? plan.id === "free"
-                        ? "Cancel to Free"
-                        : "Downgrade"
-                      : paidLocked
-                      ? "Coming soon"
-                      : plan.price === 0
-                      ? "Get started"
-                      : "Upgrade"}
-                  </button>
-                );
-              })()}
+              <button
+                onClick={() => choose(plan.id)}
+                disabled={isCurrent || busy === plan.id}
+                className={`mt-6 rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-60 ${
+                  plan.popular
+                    ? "bg-gradient-to-br from-cyan-500 to-emerald-500 text-neutral-950"
+                    : "border border-neutral-700 text-neutral-100 hover:border-neutral-500"
+                }`}
+              >
+                {isCurrent
+                  ? "Current plan"
+                  : busy === plan.id
+                  ? "Working…"
+                  : isDowngrade
+                  ? plan.id === "free"
+                    ? "Cancel to Free"
+                    : "Downgrade"
+                  : !userId
+                  ? "Get started"
+                  : plan.price === 0
+                  ? "Get started"
+                  : "Upgrade"}
+              </button>
             </div>
           );
         })}

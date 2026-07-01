@@ -106,20 +106,37 @@ def get_live_price(symbol: str) -> dict:
 _LAST_SOURCE = "unknown"
 
 
+def _cached_candle_count(symbol: str, interval: str) -> int:
+    """How many real (non-fixture) candles we have stored for this symbol/interval."""
+    with db_session() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS c FROM candles WHERE symbol = ? AND interval = ?",
+            (symbol, interval),
+        ).fetchone()
+    return row["c"] if row else 0
+
+
 def _fetch_candles(symbol: str, interval: str, count: int) -> tuple[list[dict], str]:
-    """Source priority: Twelve Data (if key) -> Yahoo (keyless live) -> fixtures."""
+    """Source priority: Twelve Data -> Yahoo -> SQLite cache -> fixtures.
+    Fixtures are the last resort — they generate simulated prices that don't
+    match the real market. If we have any previously-cached real data, serve
+    that instead and let the live-price ticker keep the last bar current."""
     if _api_key():
         try:
             return fetch_live_candles(symbol, interval, count), "live"
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[data_feed] Twelve Data failed for {symbol}/{interval}: {e}", flush=True)
     try:
         from . import yahoo_feed
 
         if yahoo_feed.supports(symbol):
             return yahoo_feed.fetch_yahoo_candles(symbol, interval, count), "live"
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[data_feed] Yahoo fetch failed for {symbol}/{interval}: {e}", flush=True)
+    # Prefer stale real data over simulated prices — fixtures deviate from the
+    # actual market and confuse users comparing the chart to what they see elsewhere.
+    if _cached_candle_count(symbol, interval) > 0:
+        return [], "cached"  # signal to get_candles to skip _store_candles and read SQLite as-is
     return fixtures.generate_candles(symbol, interval, count), "simulated"
 
 
@@ -129,7 +146,8 @@ def get_candles(symbol: str, interval: str = "1day", count: int = 300, refresh: 
     if refresh:
         new_candles, source = _fetch_candles(symbol, interval, count)
         _LAST_SOURCE = source
-        _store_candles(symbol, interval, new_candles)
+        if new_candles:  # empty list means "use cache as-is"
+            _store_candles(symbol, interval, new_candles)
 
     with db_session() as conn:
         rows = conn.execute(

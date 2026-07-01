@@ -190,10 +190,17 @@ function SignalsPageInner() {
     return () => clearInterval(id);
   }, [loadSignals]);
 
-  const visibleToday = useMemo(
-    () => (premiumOnly ? today.filter((s) => s.tier === "premium") : today),
-    [today, premiumOnly]
-  );
+  const HIDE_EXECUTED_AFTER = 30 * 60 * 1000; // 30 minutes
+  const visibleToday = useMemo(() => {
+    const now = Date.now();
+    const active = today.filter((s) => {
+      if (!s.already_executed) return true;
+      if (!s.executed_at) return true; // show briefly if no timestamp yet
+      return now - new Date(s.executed_at).getTime() < HIDE_EXECUTED_AFTER;
+    });
+    return premiumOnly ? active.filter((s) => s.tier === "premium") : active;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [today, premiumOnly]);
   const premiumCount = today.filter((s) => s.tier === "premium").length;
 
   const sotdSection = sotd && (

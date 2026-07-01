@@ -23,7 +23,10 @@ WEB_BASE_URL = _clean_env("WEB_BASE_URL", "http://localhost:3000")
 RESEND_API_KEY = _clean_env("RESEND_API_KEY")
 RESEND_FROM = _clean_env("RESEND_FROM", "PIP HIVE <onboarding@resend.dev>")
 SMTP_USER = _clean_env("SMTP_USER")
-SMTP_PASS = _clean_env("SMTP_PASS")
+# Gmail App Passwords are displayed with spaces (xxxx xxxx xxxx xxxx) but must
+# be sent without them — strip all internal whitespace so copy-paste works.
+_raw_pass = _clean_env("SMTP_PASS")
+SMTP_PASS = _raw_pass.replace(" ", "") if _raw_pass else None
 SMTP_HOST = _clean_env("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(_clean_env("SMTP_PORT", "587"))
 SMTP_FROM = _clean_env("SMTP_FROM") or SMTP_USER

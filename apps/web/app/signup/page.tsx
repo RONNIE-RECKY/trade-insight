@@ -1,39 +1,25 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { getPlans, resendCode, signup, verifyCode, type Plan } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import { resendCode, signup, verifyCode } from "@/lib/api";
 import { GoogleSignInButton } from "@/components/GoogleSignInButton";
 
 function SignupForm() {
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
-  const [plans, setPlans] = useState<Plan[]>([]);
-  const [selectedPlan, setSelectedPlan] = useState("free");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // verification step
   const [stage, setStage] = useState<"form" | "code">("form");
   const [code, setCode] = useState("");
-  const [devCode, setDevCode] = useState<string | null>(null);
-  const [emailAttempted, setEmailAttempted] = useState(false);
   const [verifying, setVerifying] = useState(false);
-
-  useEffect(() => {
-    getPlans()
-      .then((res) => setPlans(res.plans))
-      .catch(() => {});
-    const fromQuery = searchParams.get("plan");
-    if (fromQuery) setSelectedPlan(fromQuery);
-  }, [searchParams]);
 
   async function handleSignup(e: React.FormEvent) {
     e.preventDefault();
@@ -44,10 +30,7 @@ function SignupForm() {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await signup(email, password, fullName, phone, termsAccepted);
-      if (selectedPlan && selectedPlan !== "free") localStorage.setItem("pendingPlan", selectedPlan);
-      setDevCode(res.verification_code ?? null);
-      setEmailAttempted(Boolean(res.email_sent));
+      await signup(email, password, fullName, phone, termsAccepted);
       setStage("code");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Signup failed.");
@@ -62,7 +45,7 @@ function SignupForm() {
     setError(null);
     try {
       await verifyCode(email, code.trim());
-      router.push("/login");
+      router.push("/choose-plan");
     } catch {
       setError("That code is incorrect. Check the 6-digit code we emailed you.");
     } finally {
@@ -73,36 +56,20 @@ function SignupForm() {
   async function handleResend() {
     setError(null);
     try {
-      const res = await resendCode(email);
-      setDevCode(res.verification_code ?? null);
-      setEmailAttempted(Boolean(res.email_sent));
+      await resendCode(email);
     } catch {
-      setError("Couldn't resend the code.");
+      setError("Couldn't resend the code — please try again.");
     }
   }
 
   if (stage === "code") {
     return (
       <div className="max-w-sm mx-auto bg-neutral-900/60 border border-neutral-800 rounded-xl p-6 space-y-4">
-        <h1 className="text-lg font-semibold text-neutral-100">Enter your code</h1>
+        <h1 className="text-lg font-semibold text-neutral-100">Check your email</h1>
         <p className="text-sm text-neutral-400">
-          {emailAttempted ? (
-            <>
-              We sent a 6-digit verification code to <span className="text-neutral-200">{email}</span>. Enter it
-              below to activate your account.
-            </>
-          ) : (
-            <>Enter the 6-digit code below to activate your account.</>
-          )}
+          We sent a 6-digit verification code to{" "}
+          <span className="text-neutral-200">{email}</span>. Enter it below to activate your account.
         </p>
-        {devCode && (
-          <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-200">
-            {emailAttempted
-              ? "Email may take a minute to arrive (check spam) — or use this code now:"
-              : "Your verification code:"}{" "}
-            <span className="font-mono text-base tracking-widest text-amber-100">{devCode}</span>
-          </div>
-        )}
         <form onSubmit={handleVerify} className="space-y-3">
           <input
             inputMode="numeric"
@@ -139,6 +106,7 @@ function SignupForm() {
             value={fullName}
             onChange={(e) => setFullName(e.target.value)}
             required
+            placeholder="First Last"
             className="mt-1 w-full bg-neutral-950 border border-neutral-700 rounded-md px-3 py-1.5 text-sm text-neutral-100 focus:outline-none focus:ring-1 focus:ring-cyan-500"
           />
         </div>
@@ -174,39 +142,9 @@ function SignupForm() {
             className="mt-1 w-full bg-neutral-950 border border-neutral-700 rounded-md px-3 py-1.5 text-sm text-neutral-100 focus:outline-none focus:ring-1 focus:ring-cyan-500"
           />
           <p className="mt-1 text-xs text-neutral-500">
-            8+ characters, with an uppercase letter, a lowercase letter, a number, and a symbol. Can&apos;t contain
-            your name or email.
+            8+ characters, uppercase, lowercase, number and symbol. Cannot contain your name or email.
           </p>
         </div>
-
-        {plans.length > 0 && (
-          <div>
-            <label className="block text-sm font-medium text-neutral-400 mb-1.5">Choose a package</label>
-            <div className="grid grid-cols-2 gap-2">
-              {plans.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setSelectedPlan(p.id)}
-                  className={`rounded-md border px-3 py-2 text-left text-xs transition-colors ${
-                    selectedPlan === p.id
-                      ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-300"
-                      : "border-neutral-700 text-neutral-300 hover:border-neutral-500"
-                  }`}
-                >
-                  <span className="block font-semibold">{p.name}</span>
-                  <span className="block text-neutral-500">{p.price === 0 ? "Free" : `$${p.price}/mo`}</span>
-                </button>
-              ))}
-            </div>
-            {selectedPlan !== "free" && (
-              <p className="mt-1.5 text-xs text-neutral-500">
-                You&apos;ll be taken to checkout for the {plans.find((p) => p.id === selectedPlan)?.name} plan after
-                verifying your email. You can change plans anytime from your account.
-              </p>
-            )}
-          </div>
-        )}
 
         <label className="flex items-start gap-2 text-xs text-neutral-400">
           <input

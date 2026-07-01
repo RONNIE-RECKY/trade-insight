@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
-import { cancelScheduledChange, getApiKey, getPlanStatus, getPlans, hasApiAccess, type Plan, type PlanStatus } from "@/lib/api";
+import { cancelScheduledChange, checkout, getApiKey, getPlanStatus, getPlans, hasApiAccess, type Plan, type PlanStatus } from "@/lib/api";
 import { Pricing } from "@/components/Pricing";
 
 export default function AccountPage() {
@@ -15,10 +15,30 @@ export default function AccountPage() {
   const [apiBusy, setApiBusy] = useState(false);
   const [planStatus, setPlanStatus] = useState<PlanStatus | null>(null);
   const [cancelBusy, setCancelBusy] = useState(false);
+  const [redirectingToCheckout, setRedirectingToCheckout] = useState(false);
 
   useEffect(() => {
     getPlans().then((res) => setPlans(res.plans)).catch(() => {});
   }, []);
+
+  // Fulfils the promise made on /signup ("you'll be taken to checkout after
+  // verifying your email") — the chosen plan is stashed in localStorage at
+  // signup time since there's no account/session to attach it to yet.
+  useEffect(() => {
+    if (!userId) return;
+    const pending = localStorage.getItem("pendingPlan");
+    if (!pending || pending === "free" || pending === plan) {
+      localStorage.removeItem("pendingPlan");
+      return;
+    }
+    localStorage.removeItem("pendingPlan");
+    setRedirectingToCheckout(true);
+    checkout(userId, pending)
+      .then((res) => {
+        window.location.href = res.url;
+      })
+      .catch(() => setRedirectingToCheckout(false)); // fall through to the normal page; user can pick manually
+  }, [userId, plan]);
 
   const refreshPlanStatus = () => {
     if (userId) getPlanStatus(userId).then(setPlanStatus).catch(() => {});
@@ -54,6 +74,8 @@ export default function AccountPage() {
   }
 
   if (status === "loading") return <p className="text-sm text-neutral-500">Loading…</p>;
+
+  if (redirectingToCheckout) return <p className="text-sm text-neutral-500">Taking you to checkout…</p>;
 
   if (!session?.user) {
     return (

@@ -49,6 +49,7 @@ export type Signal = {
   risk_reward?: number | null;
   composite_score?: number;
   already_executed?: boolean;
+  executed_at?: string | null;
   reasoning: {
     factors: string[];
     indicator_signals: Record<string, number | boolean>;
@@ -238,7 +239,13 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`API ${path} failed: ${res.status} ${body}`);
+    let detail = body;
+    try {
+      detail = JSON.parse(body).detail ?? body;
+    } catch {
+      /* not json */
+    }
+    throw new Error(detail);
   }
   return res.json();
 }

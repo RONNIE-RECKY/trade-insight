@@ -183,11 +183,6 @@ def signup(req: SignupRequest, request: Request):
     if not verified:
         sent = _send_verification_code(req.email, code)
         response["email_sent"] = sent
-        # Always hand the code back too. A provider can report success (e.g.
-        # a sandbox sender that "sends" but never actually delivers) without
-        # the email reaching the inbox — so the on-screen code is the one
-        # guarantee that a user is never stuck, regardless of email status.
-        response["verification_code"] = code
     return response
 
 
@@ -220,7 +215,7 @@ def resend_code(req: ResendRequest, request: Request):
         code = _new_code()
         conn.execute("UPDATE users SET verification_token = ? WHERE id = ?", (code, row["id"]))
     sent = _send_verification_code(req.email, code)
-    return {"ok": True, "email_sent": sent, "verification_code": code}
+    return {"ok": True, "email_sent": sent}
 
 
 @router.post("/auth/login")
@@ -352,7 +347,22 @@ def get_watchlist(user_id: int):
 
 @router.post("/watchlist")
 def add_watchlist_item(req: WatchlistRequest):
+    from .billing import capabilities, user_plan
+
+    limit = capabilities(user_plan(req.user_id)).get("watchlist_limit")
     with db_session() as conn:
+        already_has = conn.execute(
+            "SELECT 1 FROM watchlist WHERE user_id = ? AND symbol = ?", (req.user_id, req.symbol)
+        ).fetchone()
+        if not already_has and limit is not None:
+            count = conn.execute(
+                "SELECT COUNT(*) AS c FROM watchlist WHERE user_id = ?", (req.user_id,)
+            ).fetchone()["c"]
+            if count >= limit:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"your plan allows up to {limit} watchlist symbol{'s' if limit != 1 else ''} — upgrade for more",
+                )
         conn.execute(
             "INSERT OR IGNORE INTO watchlist (user_id, symbol) VALUES (?, ?)",
             (req.user_id, req.symbol),

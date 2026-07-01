@@ -116,8 +116,16 @@ def password_must_be_unique_to_user(password: str, email: str, full_name: str | 
 def sanitize_full_name(name: str) -> str:
     name = _CONTROL_CHARS_RE.sub("", name).strip()
     name = re.sub(r"\s+", " ", name)
-    if not name or len(name) < 2 or len(name) > 100 or not _NAME_RE.match(name):
-        raise HTTPException(status_code=400, detail="enter a valid full name (letters, spaces, hyphens only)")
+    parts = name.split()
+    if (
+        not name
+        or len(name) < 3
+        or len(name) > 100
+        or not _NAME_RE.match(name)
+        or len(parts) < 2
+        or any(len(p) < 1 for p in parts)
+    ):
+        raise HTTPException(status_code=400, detail="Invalid name — please enter your first and last name.")
     return name
 
 
