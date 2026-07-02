@@ -12,6 +12,7 @@ import {
   type Signal,
 } from "@/lib/api";
 import { RequireAuth } from "@/components/RequireAuth";
+import { NewsIntel } from "@/components/NewsIntel";
 
 function directionBadgeClass(direction: string) {
   if (direction === "bullish") return "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
@@ -230,6 +231,7 @@ function SignalsPageInner() {
   if (free) {
     return (
       <div className="space-y-6">
+        <NewsIntel userId={userId} />
         {sotdSection}
         <div>
           <h2 className="text-lg font-semibold text-neutral-100">
@@ -262,6 +264,7 @@ function SignalsPageInner() {
 
   return (
     <div className="space-y-8">
+      <NewsIntel userId={userId} />
       {sotdSection}
       <section>
         <div className="flex items-center justify-between flex-wrap gap-3 mb-3">

@@ -39,6 +39,10 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(run_daily_signal_scan, "cron", hour=0, minute=5, id="daily_signal_scan")
     # Pre-warm today's signals shortly after boot so the first page load is instant.
     scheduler.add_job(_prewarm_signals, "date", id="prewarm_signals")
+    # Grade past News Intel predictions against the realized move, hourly.
+    from .news_intel import grade_due_predictions
+
+    scheduler.add_job(grade_due_predictions, "cron", minute=20, id="grade_news_intel")
     scheduler.start()
     yield
     scheduler.shutdown(wait=False)
@@ -322,6 +326,33 @@ def get_signals_history_route(limit: int = 30, symbol: str | None = None, x_user
 @app.post("/signals/run-now")
 def run_signal_scan_now_route():
     return {"signals": run_daily_signal_scan()}
+
+
+@app.get("/news-intel/xauusd")
+def news_intel_route(x_user_id: int | None = Header(default=None)):
+    """News Intel for gold: the current/next macro event (NFP, CPI, FOMC...)
+    and the engine's live XAU/USD prediction with an honest, backtest-anchored
+    probability. Paying-customers-only — the Free plan (gold-only daily signal)
+    sees it locked, same gate as Signal of the Day."""
+    from .news_intel import get_gold_events, get_news_intel
+
+    plan = user_plan(x_user_id)
+    locked = bool(capabilities(plan).get("locked_symbols"))  # only the Free plan
+    if locked:
+        # don't run the engine for locked users — just show the event calendar
+        return {"locked": True, "plan": plan, "upcoming_events": get_gold_events()}
+    return {"locked": False, "plan": plan, **get_news_intel()}
+
+
+@app.get("/news-intel/history")
+def news_intel_history_route(x_user_id: int | None = Header(default=None)):
+    """Past News Intel predictions and their realized (graded) track record."""
+    from .news_intel import accuracy_record, recent_predictions
+
+    plan = user_plan(x_user_id)
+    if capabilities(plan).get("locked_symbols"):
+        return {"locked": True, "plan": plan, "track_record": accuracy_record()}
+    return {"locked": False, "plan": plan, "predictions": recent_predictions(), "track_record": accuracy_record()}
 
 
 @app.get("/debug/test-email")

@@ -140,6 +140,30 @@ CREATE TABLE IF NOT EXISTS strategy_weights (
     weight REAL NOT NULL DEFAULT 1.0,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- News Intel: an event-driven XAU/USD prediction published around each
+-- scheduled macro release (NFP, CPI, FOMC...). Each row is graded against the
+-- actual post-event price move (see news_intel.grade_due_predictions), so the
+-- displayed accuracy is measured from real outcomes — never a fabricated claim.
+CREATE TABLE IF NOT EXISTS news_intel (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_code TEXT,
+    event_name TEXT NOT NULL,
+    event_time TEXT NOT NULL,
+    symbol TEXT NOT NULL DEFAULT 'XAUUSD',
+    direction TEXT NOT NULL,
+    probability REAL,                       -- composite, dominated by real backtested hit-rate
+    entry REAL,
+    stop_loss REAL,
+    take_profit REAL,
+    risk_reward REAL,
+    reasoning_json TEXT,
+    price_at_prediction REAL,
+    outcome TEXT NOT NULL DEFAULT 'pending', -- pending | hit | miss | neutral
+    price_after REAL,
+    graded_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 

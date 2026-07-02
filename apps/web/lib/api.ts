@@ -364,6 +364,58 @@ export function getSignalOfTheDay(userId?: number | null) {
   );
 }
 
+export type GoldEvent = {
+  code: string;
+  name: string;
+  impact: "high" | "medium";
+  time: string;
+  source: string;
+  actual?: string | null;
+  estimate?: string | null;
+  prev?: string | null;
+};
+
+export type NewsIntelPrediction = {
+  event: GoldEvent;
+  symbol: string;
+  interval: string;
+  direction: string;
+  probability: number | null;
+  confidence?: "high" | "medium" | "low";
+  backtest_hit_rate: number | null;
+  backtest_sample_size?: number;
+  confluence_score: number;
+  strategy_agreement: string;
+  strategies: StrategyVote[];
+  news_sentiment: string;
+  news_headlines: NewsHeadline[];
+  levels: TradeLevels | null;
+  commentary: string;
+  price_at_prediction: number | null;
+  generated_at: string;
+};
+
+export type NewsIntelTrackRecord = {
+  hits: number;
+  misses: number;
+  neutral: number;
+  graded: number;
+  hit_rate: number | null;
+};
+
+export type NewsIntel = {
+  locked: boolean;
+  plan: string;
+  focus_event?: GoldEvent | null;
+  upcoming_events?: GoldEvent[];
+  intel?: NewsIntelPrediction | null;
+  track_record?: NewsIntelTrackRecord;
+};
+
+export function getNewsIntel(userId?: number | null) {
+  return apiFetch<NewsIntel>("/news-intel/xauusd", userHeaders(userId));
+}
+
 export function verifyCode(email: string, code: string) {
   return apiFetch<{ ok: boolean; verified: boolean }>("/auth/verify-code", {
     method: "POST",
