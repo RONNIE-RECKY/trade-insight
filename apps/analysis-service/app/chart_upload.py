@@ -23,7 +23,6 @@ from .chart_vision import extract_candles_from_image
 from .fixtures import SYMBOLS
 from .indicators import compute_indicators, latest_indicator_signals
 from .market_context import current_position
-from .news import get_news_sentiment
 from .patterns import detect_all_patterns, detect_patterns
 from .signal_job import full_analysis
 from .strategies import evaluate_strategies
@@ -90,8 +89,7 @@ async def upload_chart(
     ind_signals = latest_indicator_signals(enriched)
     scoring_patterns = detect_patterns(df)
     all_patterns = detect_all_patterns(df)
-    news = get_news_sentiment(final_symbol)
-    result = evaluate_strategies(ind_signals, scoring_patterns, news=news)
+    result = evaluate_strategies(ind_signals, scoring_patterns)
 
     last = enriched.iloc[-1]
     close = float(last["close"])

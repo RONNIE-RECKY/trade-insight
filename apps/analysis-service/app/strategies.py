@@ -67,31 +67,11 @@ def _pattern_strategy(patterns: list[dict]) -> dict:
     return {"name": "Pattern", "signal": "neutral", "reason": "no decisive pattern"}
 
 
-def _news_strategy(news: dict | None) -> dict:
-    sentiment = (news or {}).get("sentiment")
-    if sentiment == "bullish":
-        return {"name": "News sentiment", "signal": "bullish", "reason": "recent headlines lean bullish"}
-    if sentiment == "bearish":
-        return {"name": "News sentiment", "signal": "bearish", "reason": "recent headlines lean bearish"}
-    return {"name": "News sentiment", "signal": "neutral", "reason": "no decisive news sentiment"}
-
-
-def evaluate_strategies(
-    sig: dict,
-    patterns: list[dict],
-    weights: dict[str, float] | None = None,
-    news: dict | None = None,
-) -> dict:
+def evaluate_strategies(sig: dict, patterns: list[dict], weights: dict[str, float] | None = None) -> dict:
     """Run all strategies and aggregate their votes into a direction + score.
 
-    `weights` (learned per-strategy multipliers — the adaptive/ML piece, see
-    learning.py) bias the decision toward strategies that have historically
-    performed; defaults to 1.0 each. `news` (optional — real historical news
-    per bar isn't available, so backtest.py deliberately omits it to avoid
-    lookahead bias) folds today's headline sentiment in as one more vote,
-    same as any other strategy, so every live signal is a combination of
-    strategies + patterns + news + the learned weights, not news as a
-    separate afterthought."""
+    `weights` (learned per-strategy multipliers) bias the decision toward
+    strategies that have historically performed; defaults to 1.0 each."""
     strategies = [
         _trend_following(sig),
         _momentum(sig),
@@ -100,8 +80,6 @@ def evaluate_strategies(
         _breakout(sig, patterns),
         _pattern_strategy(patterns),
     ]
-    if news is not None:
-        strategies.append(_news_strategy(news))
     if weights is None:
         try:
             from .learning import get_weights
