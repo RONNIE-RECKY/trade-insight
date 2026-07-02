@@ -42,12 +42,12 @@ MIN_CONFLUENCE = 1
 HIGH_CONFIDENCE_TARGET = 0.80
 
 
-def analyze_symbol(symbol: str, interval: str = "1day") -> dict:
+def analyze_symbol(symbol: str, interval: str = "1day", news: dict | None = None) -> dict:
     df = get_candles(symbol, interval=interval, count=300)
     enriched = compute_indicators(df)
     ind_signals = latest_indicator_signals(enriched)
     pats = detect_patterns(df)
-    result = evaluate_strategies(ind_signals, pats)
+    result = evaluate_strategies(ind_signals, pats, news=news)
     result["indicator_signals"] = ind_signals
     result["patterns"] = pats
     result["symbol"] = symbol
@@ -61,7 +61,8 @@ def analyze_symbol(symbol: str, interval: str = "1day") -> dict:
 
 
 def analyze_symbol_multi_timeframe(symbol: str) -> dict:
-    per_tf = {tf: analyze_symbol(symbol, interval=tf) for tf in HIGHER_TIMEFRAMES}
+    news = get_news_sentiment(symbol)
+    per_tf = {tf: analyze_symbol(symbol, interval=tf, news=news) for tf in HIGHER_TIMEFRAMES}
 
     directions = [r["direction"] for r in per_tf.values() if r["direction"] != "neutral"]
     if directions and all(d == directions[0] for d in directions) and len(directions) == len(HIGHER_TIMEFRAMES):
@@ -89,7 +90,8 @@ def full_analysis(symbol: str, interval: str) -> dict:
     # scored with the same latest-bar pattern read used elsewhere
     all_patterns = detect_all_patterns(df)
     scoring_patterns = detect_patterns(df)
-    result = evaluate_strategies(ind_signals, scoring_patterns)
+    news = get_news_sentiment(symbol)
+    result = evaluate_strategies(ind_signals, scoring_patterns, news=news)
 
     last = enriched.iloc[-1] if len(enriched) else None
     close = float(last["close"]) if last is not None else None
@@ -97,7 +99,6 @@ def full_analysis(symbol: str, interval: str) -> dict:
 
     levels = compute_trade_levels(result["direction"], close, atr, scoring_patterns, result["confluence_score"])
     position = current_position(df, enriched, levels)
-    news = get_news_sentiment(symbol)
     commentary = generate_analysis_commentary(
         symbol, interval, result["direction"], result["factors"], position, news
     )
@@ -154,7 +155,7 @@ def predict_symbol_timeframes(symbol: str) -> list[dict]:
 
     predictions = []
     for tf in PREDICTION_TIMEFRAMES:
-        analysis = analyze_symbol(symbol, tf)
+        analysis = analyze_symbol(symbol, tf, news=news)
         levels = compute_trade_levels(
             analysis["direction"], analysis["close"], analysis["atr"], analysis["patterns"], analysis["confluence_score"]
         )
@@ -207,7 +208,7 @@ def run_daily_signal_scan(symbols: list[str] | None = None) -> list[dict]:
         mtf = _mtf_from_higher(symbol)
 
         for tf in PREDICTION_TIMEFRAMES:
-            analysis = analyze_symbol(symbol, tf)
+            analysis = analyze_symbol(symbol, tf, news=news)
             if analysis["direction"] == "neutral" or analysis["confluence_score"] < MIN_CONFLUENCE:
                 continue
 
