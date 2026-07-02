@@ -74,9 +74,7 @@ function SignalCard({
   return (
     <div
       className={`rounded-xl p-5 space-y-3 border ${
-        signal.already_executed
-          ? "border-neutral-800 bg-neutral-900/30 opacity-60"
-          : isPremium
+        isPremium
           ? "border-cyan-500/40 bg-gradient-to-b from-cyan-500/5 to-neutral-900/60"
           : "border-neutral-800 bg-neutral-900/60"
       }`}
@@ -94,15 +92,7 @@ function SignalCard({
               premium
             </span>
           )}
-          {signal.already_executed && (
-            <span
-              title="Your auto-trade bot already opened a position from this signal — it won't be reused."
-              className="text-[10px] text-neutral-400 bg-neutral-800 border border-neutral-700 rounded px-1.5 py-0.5"
-            >
-              already executed
-            </span>
-          )}
-        </h3>
+            </h3>
         <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${directionBadgeClass(signal.direction)}`}>
           {signal.direction} · conf {signal.confluence_score}
         </span>
@@ -190,16 +180,9 @@ function SignalsPageInner() {
     return () => clearInterval(id);
   }, [loadSignals]);
 
-  const HIDE_EXECUTED_AFTER = 30 * 60 * 1000; // 30 minutes
   const visibleToday = useMemo(() => {
-    const now = Date.now();
-    const active = today.filter((s) => {
-      if (!s.already_executed) return true;
-      if (!s.executed_at) return true; // show briefly if no timestamp yet
-      return now - new Date(s.executed_at).getTime() < HIDE_EXECUTED_AFTER;
-    });
+    const active = today.filter((s) => !s.already_executed);
     return premiumOnly ? active.filter((s) => s.tier === "premium") : active;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [today, premiumOnly]);
   const premiumCount = today.filter((s) => s.tier === "premium").length;
 
