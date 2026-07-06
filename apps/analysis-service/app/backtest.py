@@ -18,13 +18,29 @@ from .strategies import evaluate_strategies
 
 MIN_LOOKBACK = 60
 
+# A fixed 0.5% move-in-5-bars target is trivial on a daily chart and nearly
+# impossible on 5-minute bars — grading every timeframe against it made
+# intraday hit-rates meaninglessly low. Scale the target to the bar size so
+# each timeframe's hit-rate measures a realistic move for that horizon.
+INTERVAL_MOVE_THRESHOLD = {
+    "5min": 0.0008,
+    "15min": 0.0012,
+    "30min": 0.0018,
+    "1h": 0.0025,
+    "4h": 0.004,
+    "1day": 0.005,
+}
+
 
 def run_backtest(
     df: pd.DataFrame,
     lookahead: int = 5,
-    move_threshold: float = 0.005,
+    move_threshold: float | None = None,
     min_confluence: int = 2,
+    interval: str = "1day",
 ) -> dict:
+    if move_threshold is None:
+        move_threshold = INTERVAL_MOVE_THRESHOLD.get(interval, 0.005)
     if len(df) < MIN_LOOKBACK + lookahead + 1:
         return {
             "total_signals": 0,

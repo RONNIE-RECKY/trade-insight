@@ -32,14 +32,21 @@ from .trade_levels import compute_trade_levels
 PREDICTION_TIMEFRAMES = ["5min", "15min", "30min", "1h", "4h", "1day"]
 # Higher timeframes used for the premium multi-timeframe agreement gate.
 HIGHER_TIMEFRAMES = ["1h", "4h", "1day"]
-# Minimum confluence for a setup to be published as a signal at all. We keep
-# this low so the feed has useful breadth across symbols/timeframes; quality is
-# communicated per-signal via the tier ("premium" = multi-timeframe agreement)
-# and each signal's own real backtested hit-rate — not by hiding weaker setups.
-MIN_CONFLUENCE = 1
+# Minimum confluence for a setup to be published as a signal at all. With the
+# 11-strategy consensus (6 indicator + 5 price-structure), a lone agreeing
+# strategy is noise — require at least 2 independent confirmations. Quality is
+# still communicated per-signal via the tier ("premium" = multi-timeframe
+# agreement) and each signal's own real backtested hit-rate.
+MIN_CONFLUENCE = 2
 # A setup is only labelled "high confidence" when its MEASURED backtested
 # hit-rate clears this bar (plus strong strategy agreement). Never a claim.
 HIGH_CONFIDENCE_TARGET = 0.80
+# Publish quality floor: a setup with a real measured track record (enough
+# backtest samples) that hits less than this is not published at all —
+# accuracy over volume. Setups without enough history still publish, honestly
+# labelled "not enough history yet".
+MIN_PUBLISH_HIT_RATE = 0.40
+MIN_BACKTEST_SAMPLE = 10
 
 
 def analyze_symbol(symbol: str, interval: str = "1day") -> dict:
@@ -106,17 +113,18 @@ def full_analysis(symbol: str, interval: str) -> dict:
     # walk-forward hit-rate and only call it "high" when that measured number
     # clears the target AND the strategies strongly agree AND news doesn't fight
     # the direction. Otherwise it's labelled medium/low honestly.
-    bt = run_backtest(df)
+    bt = run_backtest(df, interval=interval)
     hit_rate = bt["hit_rate"]
     agree_count = result["confluence_score"]
     news_ok = news["sentiment"] in ("neutral", result["direction"])
     meets_target = hit_rate is not None and hit_rate >= HIGH_CONFIDENCE_TARGET
+    # thresholds scaled to the 11-strategy consensus (was 4/3 when there were 6)
     high_confidence = bool(
-        result["direction"] != "neutral" and meets_target and agree_count >= 4 and news_ok
+        result["direction"] != "neutral" and meets_target and agree_count >= 5 and news_ok
     )
     if high_confidence:
         confidence = "high"
-    elif result["direction"] != "neutral" and agree_count >= 3 and (hit_rate or 0) >= 0.6:
+    elif result["direction"] != "neutral" and agree_count >= 4 and (hit_rate or 0) >= 0.6:
         confidence = "medium"
     else:
         confidence = "low"
@@ -219,7 +227,17 @@ def run_daily_signal_scan(symbols: list[str] | None = None) -> list[dict]:
 
             tier = _tier(tf, analysis["direction"], mtf, news)
             df = get_candles(symbol, interval=tf, count=300, refresh=False)
-            bt = run_backtest(df)
+            bt = run_backtest(df, interval=tf)
+            # Quality floor: if this rule has a real measured track record on
+            # this timeframe and it's worse than a coin flip minus margin,
+            # don't publish it — accuracy over volume. Setups without enough
+            # history still publish (shown as "not enough history yet").
+            if (
+                bt["hit_rate"] is not None
+                and bt["total_signals"] >= MIN_BACKTEST_SAMPLE
+                and bt["hit_rate"] < MIN_PUBLISH_HIT_RATE
+            ):
+                continue
             commentary = generate_signal_commentary(symbol, tf, analysis["direction"], analysis["factors"], tier, news)
 
             with db_session() as conn:
@@ -265,7 +283,11 @@ def get_today_signal() -> list[dict]:
     with db_session() as conn:
         rows = conn.execute(
             "SELECT * FROM signals WHERE date = ? "
-            "ORDER BY CASE tier WHEN 'premium' THEN 0 ELSE 1 END, confluence_score DESC",
+            # most-accurate first: premium tier, then each signal's own measured
+            # backtested hit-rate, then strategy agreement — so plan caps (e.g.
+            # Pro's 10/day) always keep the strongest setups
+            "ORDER BY CASE tier WHEN 'premium' THEN 0 ELSE 1 END, "
+            "backtest_hit_rate DESC NULLS LAST, confluence_score DESC",
             (today,),
         ).fetchall()
     return [_row_to_signal(r) for r in rows]
@@ -309,7 +331,7 @@ def get_signal_of_the_day() -> dict | None:
     def score(sig: dict) -> float:
         hit = sig.get("backtest_hit_rate") or 0.0
         tier_bonus = 1.0 if sig.get("tier") == "premium" else 0.0
-        confluence = min(sig.get("confluence_score", 0), 6) / 6
+        confluence = min(sig.get("confluence_score", 0), 11) / 11  # 11-strategy consensus
         learned = strategy_weight_avg(sig) / 1.8  # normalised against learning.py's max weight
         return hit * 0.5 + tier_bonus * 0.25 + confluence * 0.15 + learned * 0.10
 
@@ -323,7 +345,8 @@ def get_signal_history(limit: int = 60) -> list[dict]:
     with db_session() as conn:
         rows = conn.execute(
             "SELECT * FROM signals ORDER BY date DESC, "
-            "CASE tier WHEN 'premium' THEN 0 ELSE 1 END, confluence_score DESC LIMIT ?",
+            "CASE tier WHEN 'premium' THEN 0 ELSE 1 END, "
+            "backtest_hit_rate DESC NULLS LAST, confluence_score DESC LIMIT ?",
             (limit,),
         ).fetchall()
     return [_row_to_signal(r) for r in rows]

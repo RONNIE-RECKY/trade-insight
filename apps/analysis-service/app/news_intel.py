@@ -216,7 +216,7 @@ def _probability(analysis: dict) -> float | None:
     invent a number.
 
       prob = 0.70 * backtested_hit_rate
-           + 0.20 * (strategies agreeing / 6)
+           + 0.20 * (strategies agreeing / 11)
            + 0.10 * (news aligns with the direction ? 1 : 0)
 
     Bounded [0,1], and because the hit-rate term is the dominant one, the
@@ -225,7 +225,7 @@ def _probability(analysis: dict) -> float | None:
     hit = analysis.get("backtest_hit_rate")
     if hit is None:
         return None
-    agreement = min(analysis.get("confluence_score", 0), 6) / 6
+    agreement = min(analysis.get("confluence_score", 0), 11) / 11  # 11-strategy consensus
     news_ok = 1.0 if analysis.get("news_sentiment") in ("neutral", analysis.get("direction")) else 0.0
     prob = 0.70 * hit + 0.20 * agreement + 0.10 * news_ok
     return round(max(0.0, min(1.0, prob)), 4)

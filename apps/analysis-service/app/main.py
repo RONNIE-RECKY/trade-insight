@@ -230,10 +230,10 @@ def export_analysis_route(
 
 
 @app.get("/backtest/{symbol}")
-def get_backtest_route(symbol: str, interval: str = "1day", lookahead: int = 5, move_threshold: float = 0.005):
+def get_backtest_route(symbol: str, interval: str = "1day", lookahead: int = 5, move_threshold: float | None = None):
     _validate_symbol(symbol)
     df = get_candles(symbol, interval=interval, count=300)
-    return run_backtest(df, lookahead=lookahead, move_threshold=move_threshold)
+    return run_backtest(df, lookahead=lookahead, move_threshold=move_threshold, interval=interval)
 
 
 def _apply_plan_gate(signals: list[dict], plan: str, symbol: str | None) -> list[dict]:
