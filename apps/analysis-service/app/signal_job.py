@@ -47,7 +47,7 @@ def analyze_symbol(symbol: str, interval: str = "1day") -> dict:
     enriched = compute_indicators(df)
     ind_signals = latest_indicator_signals(enriched)
     pats = detect_patterns(df)
-    result = evaluate_strategies(ind_signals, pats)
+    result = evaluate_strategies(ind_signals, pats, df=df)
     result["indicator_signals"] = ind_signals
     result["patterns"] = pats
     result["symbol"] = symbol
@@ -89,7 +89,7 @@ def full_analysis(symbol: str, interval: str) -> dict:
     # scored with the same latest-bar pattern read used elsewhere
     all_patterns = detect_all_patterns(df)
     scoring_patterns = detect_patterns(df)
-    result = evaluate_strategies(ind_signals, scoring_patterns)
+    result = evaluate_strategies(ind_signals, scoring_patterns, df=df)
 
     last = enriched.iloc[-1] if len(enriched) else None
     close = float(last["close"]) if last is not None else None

@@ -67,11 +67,22 @@ def _pattern_strategy(patterns: list[dict]) -> dict:
     return {"name": "Pattern", "signal": "neutral", "reason": "no decisive pattern"}
 
 
-def evaluate_strategies(sig: dict, patterns: list[dict], weights: dict[str, float] | None = None) -> dict:
+def evaluate_strategies(
+    sig: dict,
+    patterns: list[dict],
+    weights: dict[str, float] | None = None,
+    df=None,
+) -> dict:
     """Run all strategies and aggregate their votes into a direction + score.
 
     `weights` (learned per-strategy multipliers) bias the decision toward
-    strategies that have historically performed; defaults to 1.0 each."""
+    strategies that have historically performed; defaults to 1.0 each.
+
+    `df` (optional candle DataFrame) enables the price-structure strategies —
+    market structure, psychological levels, Fibonacci, trendline and
+    candlestick — which need the series, not just the latest indicator
+    snapshot. They read recent bars causally, so the backtest can pass the
+    same per-bar slice and vote with the identical rule set."""
     strategies = [
         _trend_following(sig),
         _momentum(sig),
@@ -80,6 +91,13 @@ def evaluate_strategies(sig: dict, patterns: list[dict], weights: dict[str, floa
         _breakout(sig, patterns),
         _pattern_strategy(patterns),
     ]
+    if df is not None:
+        try:
+            from .structure_strategies import evaluate_structure_strategies
+
+            strategies.extend(evaluate_structure_strategies(df))
+        except Exception:
+            pass  # structure strategies are additive; never break the core vote
     if weights is None:
         try:
             from .learning import get_weights

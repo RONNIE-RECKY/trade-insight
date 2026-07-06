@@ -89,7 +89,7 @@ async def upload_chart(
     ind_signals = latest_indicator_signals(enriched)
     scoring_patterns = detect_patterns(df)
     all_patterns = detect_all_patterns(df)
-    result = evaluate_strategies(ind_signals, scoring_patterns)
+    result = evaluate_strategies(ind_signals, scoring_patterns, df=df)
 
     last = enriched.iloc[-1]
     close = float(last["close"])

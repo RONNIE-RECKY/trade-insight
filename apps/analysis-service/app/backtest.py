@@ -57,7 +57,9 @@ def run_backtest(
     for i in range(MIN_LOOKBACK, len(df) - lookahead):
         ind_signals = indicator_signals_at(enriched, i)
         pats = patterns_as_of(swings, i)
-        result = evaluate_strategies(ind_signals, pats, weights)
+        # causal slice up to bar i so the price-structure strategies vote with
+        # the exact same rules live and in the backtest (they read df.tail(60))
+        result = evaluate_strategies(ind_signals, pats, weights, df=df.iloc[: i + 1])
 
         if result["direction"] == "neutral" or result["confluence_score"] < min_confluence:
             continue

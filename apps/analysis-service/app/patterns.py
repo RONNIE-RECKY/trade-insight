@@ -11,19 +11,29 @@ import pandas as pd
 
 def find_swing_points(df: pd.DataFrame, window: int = 3) -> pd.DataFrame:
     """Mark local swing highs/lows: a bar whose high/low is the extreme
-    within +/- `window` bars."""
-    out = df.copy()
-    out["swing_high"] = False
-    out["swing_low"] = False
+    within +/- `window` bars.
 
+    Vectorised via a centred rolling window (equivalent to the original
+    per-bar scan but O(n) instead of O(n*window)), which matters because the
+    backtest and the price-structure strategies call this on every bar."""
+    out = df.copy()
     n = len(out)
-    for i in range(window, n - window):
-        segment_high = out["high"].iloc[i - window : i + window + 1]
-        segment_low = out["low"].iloc[i - window : i + window + 1]
-        if out["high"].iloc[i] == segment_high.max():
-            out.loc[out.index[i], "swing_high"] = True
-        if out["low"].iloc[i] == segment_low.min():
-            out.loc[out.index[i], "swing_low"] = True
+    size = 2 * window + 1
+    if n < size:
+        out["swing_high"] = False
+        out["swing_low"] = False
+        return out
+
+    roll_max = out["high"].rolling(size, center=True).max()
+    roll_min = out["low"].rolling(size, center=True).min()
+    out["swing_high"] = (out["high"] >= roll_max) & roll_max.notna()
+    out["swing_low"] = (out["low"] <= roll_min) & roll_min.notna()
+    # the first/last `window` bars can't be centred pivots
+    if window > 0:
+        out.iloc[:window, out.columns.get_loc("swing_high")] = False
+        out.iloc[:window, out.columns.get_loc("swing_low")] = False
+        out.iloc[n - window :, out.columns.get_loc("swing_high")] = False
+        out.iloc[n - window :, out.columns.get_loc("swing_low")] = False
 
     return out
 
