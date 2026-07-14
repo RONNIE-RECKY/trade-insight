@@ -324,7 +324,10 @@ def refresh_stale_signals() -> None:
                 needs_refresh.setdefault(symbol, []).append(tf)
 
     for symbol, intervals in needs_refresh.items():
-        _scan_symbol_for_intervals(symbol, intervals, today)
+        try:
+            _scan_symbol_for_intervals(symbol, intervals, today)
+        except Exception:
+            pass  # one bad symbol/network error never blocks the rest
 
 
 def run_daily_signal_scan(symbols: list[str] | None = None) -> list[dict]:
@@ -337,14 +340,20 @@ def run_daily_signal_scan(symbols: list[str] | None = None) -> list[dict]:
         conn.execute("DELETE FROM signals WHERE date = ?", (today,))
 
     for symbol in symbols:
-        _scan_symbol_for_intervals(symbol, list(PREDICTION_TIMEFRAMES), today)
+        try:
+            _scan_symbol_for_intervals(symbol, list(PREDICTION_TIMEFRAMES), today)
+        except Exception:
+            pass
 
     return get_today_signal(skip_refresh=True)
 
 
 def get_today_signal(skip_refresh: bool = False) -> list[dict]:
     if not skip_refresh:
-        refresh_stale_signals()
+        try:
+            refresh_stale_signals()
+        except Exception:
+            pass  # return stale DB data rather than crashing the endpoint
     today = date.today().isoformat()
     with db_session() as conn:
         rows = conn.execute(
