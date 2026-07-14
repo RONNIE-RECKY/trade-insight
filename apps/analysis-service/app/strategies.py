@@ -116,15 +116,16 @@ def evaluate_strategies(
 
     # weighted decision, but report agreement as the plain vote count
     if bull_w > bear_w:
-        direction, agreeing = "bullish", bulls
+        direction, agreeing, opposing = "bullish", bulls, bears
     elif bear_w > bull_w:
-        direction, agreeing = "bearish", bears
+        direction, agreeing, opposing = "bearish", bears, bulls
     else:
-        direction, agreeing = "neutral", []
+        direction, agreeing, opposing = "neutral", [], bulls + bears
 
     return {
         "direction": direction,
         "confluence_score": len(agreeing),
+        "opposing_count": len(opposing),
         "strategies": strategies,
         "factors": [s["name"] for s in agreeing],
         "strategy_agreement": f"{len(agreeing)}/{len(strategies)}",

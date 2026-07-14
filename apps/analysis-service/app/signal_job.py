@@ -42,6 +42,12 @@ HIGHER_TIMEFRAMES = ["1h", "4h", "1day"]
 # still communicated per-signal via the tier ("premium" = multi-timeframe
 # agreement) and each signal's own real backtested hit-rate.
 MIN_CONFLUENCE = 2
+# Maximum number of strategies allowed to vote the OPPOSITE direction. If 2 or
+# more strategies actively disagree with the majority vote the signal is
+# contested — it is discarded rather than published as a false-conviction setup.
+# Allows 1 dissenting voice (one strategy can always be in a pullback phase);
+# a second dissenter means the picture is genuinely mixed.
+MAX_CONFLICT = 1
 # A setup is only labelled "high confidence" when its MEASURED backtested
 # hit-rate clears this bar (plus strong strategy agreement). Never a claim.
 HIGH_CONFIDENCE_TARGET = 0.80
@@ -247,8 +253,13 @@ def _scan_symbol_for_intervals(symbol: str, intervals: list[str], today: str) ->
 
     for tf in intervals:
         analysis = analyze_symbol(symbol, tf)
-        if analysis["direction"] == "neutral" or analysis["confluence_score"] < MIN_CONFLUENCE:
-            # Setup dissolved — remove the stale signal so it doesn't mislead.
+        if (
+            analysis["direction"] == "neutral"
+            or analysis["confluence_score"] < MIN_CONFLUENCE
+            or analysis.get("opposing_count", 0) > MAX_CONFLICT
+        ):
+            # Setup is neutral, too weak, or contested by too many strategies.
+            # Remove the stale signal so it doesn't mislead.
             with db_session() as conn:
                 conn.execute("DELETE FROM signals WHERE symbol=? AND date=? AND interval=?", (symbol, today, tf))
             continue
