@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from .admin import router as admin_router
 from .auth import router as auth_router
@@ -14,6 +17,7 @@ from .chart_upload import router as chart_upload_router
 from .mt5_bridge import router as mt5_bridge_router
 from .backtest import run_backtest
 from .data_feed import get_candles, get_live_price
+from .news import get_news_sentiment
 from .db import init_db
 from .fixtures import SYMBOLS
 from .indicators import compute_indicators, latest_indicator_signals
@@ -137,6 +141,40 @@ def get_price_route(symbol: str):
     update once a bar closes; this is for a live ticker / chart last-bar patch)."""
     _validate_symbol(symbol)
     return {"symbol": symbol, **get_live_price(symbol)}
+
+
+@app.get("/price-stream/{symbol}")
+async def price_stream_route(symbol: str):
+    """Server-Sent Events stream — pushes a price tick every 2 s.
+    The chart subscribes with EventSource so updates arrive without repeated
+    HTTP connection overhead. X-Accel-Buffering disables Railway/nginx proxy
+    buffering so events aren't held until the buffer fills."""
+    _validate_symbol(symbol)
+
+    async def generator():
+        while True:
+            try:
+                data = get_live_price(symbol)
+                data["symbol"] = symbol
+                yield f"data: {json.dumps(data)}\n\n"
+            except Exception:
+                pass
+            await asyncio.sleep(2)
+
+    return StreamingResponse(
+        generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/news/{symbol}")
+def news_route(symbol: str):
+    """Current news sentiment for the pair — uses a 5-minute cache so the
+    chart page and signal engine share the same fetch rather than each
+    independently hitting Finnhub."""
+    _validate_symbol(symbol)
+    return get_news_sentiment(symbol)
 
 
 @app.get("/analysis/{symbol}")

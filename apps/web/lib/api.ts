@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 export type Candle = {
   ts: string;
@@ -312,6 +312,19 @@ export type LivePrice = { symbol: string; price: number; ts: string; source: str
 
 export function getLivePrice(symbol: string) {
   return apiFetch<LivePrice>(`/price/${encodeURIComponent(symbol)}`);
+}
+
+export type NewsResult = {
+  symbol: string;
+  sentiment: "bullish" | "bearish" | "neutral";
+  score: number;
+  source: "live" | "fixture";
+  fetched_at: string;
+  headlines: NewsHeadline[];
+};
+
+export function getNewsForSymbol(symbol: string) {
+  return apiFetch<NewsResult>(`/news/${encodeURIComponent(symbol)}`);
 }
 
 export function listSymbols() {

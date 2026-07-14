@@ -11,9 +11,16 @@ from __future__ import annotations
 
 import os
 import random
+import time
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import httpx
+
+# 5-minute process-level cache — avoids hitting Finnhub on every chart
+# auto-refresh (which runs as often as every 15 s on 5M timeframe).
+_NEWS_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_NEWS_TTL = 300  # seconds
 
 FINNHUB_NEWS_URL = "https://finnhub.io/api/v1/news"
 
@@ -88,7 +95,7 @@ def _fixture_headlines(symbol: str) -> list[str]:
     return rng.sample(_FIXTURE_HEADLINES, k=min(5, len(_FIXTURE_HEADLINES)))
 
 
-def get_news_sentiment(symbol: str) -> dict:
+def _fetch_sentiment(symbol: str) -> dict:
     try:
         headlines = _fetch_live_headlines()
         source = "live"
@@ -109,7 +116,6 @@ def get_news_sentiment(symbol: str) -> dict:
         if not matched_base and not matched_quote:
             continue
         score = _score_headline(headline)
-        # quote-currency news affects the pair inversely to base-currency news
         pair_contribution = score if matched_base else -score
         relevant.append({"headline": headline, "score": score, "currency_side": "base" if matched_base else "quote"})
         pair_score += pair_contribution
@@ -127,4 +133,16 @@ def get_news_sentiment(symbol: str) -> dict:
         "sentiment": sentiment,
         "score": pair_score,
         "headlines": relevant,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def get_news_sentiment(symbol: str) -> dict:
+    """Return news sentiment for the symbol, using a 5-minute cache so
+    callers (analysis, signal scan, chart refresh) don't hammer Finnhub."""
+    cached_ts, cached = _NEWS_CACHE.get(symbol, (0.0, {}))
+    if cached and time.monotonic() - cached_ts < _NEWS_TTL:
+        return cached
+    result = _fetch_sentiment(symbol)
+    _NEWS_CACHE[symbol] = (time.monotonic(), result)
+    return result

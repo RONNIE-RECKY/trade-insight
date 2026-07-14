@@ -11,11 +11,13 @@ import {
   canUseIntradayBot,
   exportAnalysisUrl,
   getCandles,
-  getLivePrice,
+  getNewsForSymbol,
   listSymbols,
+  API_BASE_URL,
   type Candle,
   type FullAnalysis,
   type LivePrice,
+  type NewsResult,
 } from "@/lib/api";
 
 const TIMEFRAMES = [
@@ -74,6 +76,7 @@ function ChartsPageInner() {
   const [live, setLive] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [livePrice, setLivePrice] = useState<LivePrice | null>(null);
+  const [news, setNews] = useState<NewsResult | null>(null);
 
   useEffect(() => {
     listSymbols()
@@ -90,10 +93,11 @@ function ChartsPageInner() {
       if (!symbol) return;
       if (!silent) setLoading(true);
       setError(null);
-      Promise.all([getCandles(symbol, interval), analyze(symbol, interval, userId)])
-        .then(([c, r]) => {
+      Promise.all([getCandles(symbol, interval), analyze(symbol, interval, userId), getNewsForSymbol(symbol)])
+        .then(([c, r, n]) => {
           setCandles(c.candles);
           setReport(r);
+          setNews(n);
           setLastUpdated(new Date());
         })
         .catch((e) => setError(String(e)))
@@ -116,14 +120,17 @@ function ChartsPageInner() {
     return () => clearInterval(id);
   }, [live, symbol, interval, runAnalysis]);
 
-  // fast live-price ticker: polls /price every 5 s and patches the chart's
-  // last bar in place — no full candle reload, so it feels near-real-time
+  // Live price via Server-Sent Events — backend pushes a tick every 2 s so
+  // the chart last-bar patches in near-real-time without repeated HTTP setup.
+  // Falls back gracefully: if the connection drops, the browser reconnects.
   useEffect(() => {
     if (!live || !symbol) return;
-    const fetch = () => getLivePrice(symbol).then(setLivePrice).catch(() => {});
-    fetch();
-    const id = setInterval(fetch, 5_000);
-    return () => clearInterval(id);
+    const es = new EventSource(`${API_BASE_URL}/price-stream/${encodeURIComponent(symbol)}`);
+    es.onmessage = (e) => {
+      try { setLivePrice(JSON.parse(e.data)); } catch { /* malformed tick, ignore */ }
+    };
+    es.onerror = () => { /* browser auto-reconnects on error */ };
+    return () => es.close();
   }, [live, symbol]);
 
   const cp = report?.current_position;
@@ -273,6 +280,81 @@ function ChartsPageInner() {
             </div>
           )}
           <Chart candles={candles} patterns={report?.patterns ?? []} levels={report?.levels ?? null} livePrice={livePrice} />
+        </div>
+      )}
+
+      {/* News sentiment card */}
+      {news && (
+        <div className="bg-neutral-900/60 border border-neutral-800 rounded-xl p-5 space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h2 className="font-semibold text-neutral-100 flex items-center gap-2">
+              Market news
+              <span
+                className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
+                  news.sentiment === "bullish"
+                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                    : news.sentiment === "bearish"
+                    ? "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                    : "bg-neutral-500/10 text-neutral-400 border-neutral-500/20"
+                }`}
+              >
+                {news.sentiment}
+              </span>
+              {news.source === "fixture" && (
+                <span className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-full px-2 py-0.5">
+                  demo data
+                </span>
+              )}
+            </h2>
+            <span className="text-[10px] text-neutral-500">
+              {news.fetched_at
+                ? `Last checked ${Math.round((Date.now() - new Date(news.fetched_at).getTime()) / 60_000)} min ago`
+                : ""}
+            </span>
+          </div>
+
+          {/* News vs direction alignment message */}
+          {report && report.direction !== "neutral" && news.sentiment !== "neutral" && (
+            <p
+              className={`text-xs px-3 py-2 rounded-lg border ${
+                news.sentiment === report.direction
+                  ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-300"
+                  : "bg-amber-500/5 border-amber-500/20 text-amber-300"
+              }`}
+            >
+              {news.sentiment === report.direction
+                ? `News is ${news.sentiment} — supporting this ${report.direction === "bullish" ? "buy" : "sell"} signal`
+                : `News is ${news.sentiment} but bot is ${report.direction} — lower conviction, trade smaller`}
+            </p>
+          )}
+
+          {news.headlines.length === 0 ? (
+            <p className="text-xs text-neutral-500">No relevant headlines for this pair right now.</p>
+          ) : (
+            <ul className="space-y-1.5">
+              {news.headlines.slice(0, 6).map((h, i) => (
+                <li
+                  key={i}
+                  className={`text-xs px-3 py-2 rounded-lg border flex items-start justify-between gap-3 ${
+                    h.score > 0
+                      ? "bg-emerald-500/5 border-emerald-500/15 text-emerald-200"
+                      : h.score < 0
+                      ? "bg-rose-500/5 border-rose-500/15 text-rose-200"
+                      : "bg-neutral-800/40 border-neutral-700/40 text-neutral-300"
+                  }`}
+                >
+                  <span>{h.headline}</span>
+                  <span
+                    className={`shrink-0 text-[10px] font-mono font-semibold ${
+                      h.score > 0 ? "text-emerald-400" : h.score < 0 ? "text-rose-400" : "text-neutral-500"
+                    }`}
+                  >
+                    {h.score > 0 ? `+${h.score}` : h.score}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 
