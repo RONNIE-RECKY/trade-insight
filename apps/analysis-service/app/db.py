@@ -206,6 +206,15 @@ _MIGRATIONS = [
     ("auto_trades", "confirm_token", "TEXT"),
     ("auto_trades", "confirm_expires_at", "TEXT"),
     ("auto_trades", "confirmed_at", "TEXT"),
+    ("signals", "generated_at", "TEXT NOT NULL DEFAULT (datetime('now'))"),
+]
+
+# DDL statements run once, idempotent (IF NOT EXISTS / OR IGNORE guards).
+_INDEX_MIGRATIONS = [
+    # Ensures each (symbol, date, interval) slot holds exactly one signal at a
+    # time — lets refresh_stale_signals() do an INSERT OR REPLACE without
+    # stacking duplicates when two requests race.
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_signal_unique ON signals(symbol, date, interval)",
 ]
 
 
@@ -218,6 +227,8 @@ def init_db() -> None:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
             except sqlite3.OperationalError:
                 pass  # column already exists
+        for ddl in _INDEX_MIGRATIONS:
+            conn.execute(ddl)
 
 
 @contextmanager

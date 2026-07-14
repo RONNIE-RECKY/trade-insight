@@ -29,6 +29,25 @@ const TF_LABEL: Record<string, string> = {
   "1day": "1D",
 };
 
+const TF_MINUTES: Record<string, number> = {
+  "5min": 5, "15min": 15, "30min": 30, "1h": 60, "4h": 240, "1day": 1440,
+};
+
+function SignalAge({ generatedAt, interval }: { generatedAt?: string | null; interval?: string }) {
+  if (!generatedAt) return null;
+  const ageMins = Math.floor((Date.now() - new Date(generatedAt + "Z").getTime()) / 60_000);
+  const periodMins = interval ? (TF_MINUTES[interval] ?? 1440) : 1440;
+  const fresh = ageMins < periodMins;
+  const label = ageMins < 1 ? "just now" : ageMins < 60 ? `${ageMins}m ago` : `${Math.floor(ageMins / 60)}h ${ageMins % 60}m ago`;
+  return (
+    <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
+      fresh ? "text-emerald-400 border-emerald-500/20 bg-emerald-500/10" : "text-amber-400 border-amber-500/20 bg-amber-500/10"
+    }`}>
+      {label}
+    </span>
+  );
+}
+
 function SignalCard({
   signal,
   locked,
@@ -95,6 +114,7 @@ function SignalCard({
               premium
             </span>
           )}
+          <SignalAge generatedAt={signal.generated_at} interval={signal.interval} />
           {signal.already_executed && (
             <span
               title="Your auto-trade bot already opened a position from this signal — it won't be reused."
@@ -276,8 +296,9 @@ function SignalsPageInner() {
               </span>
             </h2>
             <p className="text-xs text-neutral-500 mt-1">
-              Generated across every symbol and timeframe. Premium = 1h/4h/daily agree and news doesn&apos;t
-              contradict. Each shows its own real backtested hit-rate.
+              Each signal refreshes on its own candle period — a 30M signal updates every 30 minutes, a 1H
+              every hour, and so on. Premium = 1h/4h/daily all agree and news doesn&apos;t contradict. Each shows
+              its own real backtested hit-rate.
             </p>
           </div>
           <div className="flex items-center gap-1 bg-neutral-900 border border-neutral-800 rounded-md p-1">

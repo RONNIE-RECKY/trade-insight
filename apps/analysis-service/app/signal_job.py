@@ -14,7 +14,7 @@ lower backtested hit-rate than a clean daily one, and the UI surfaces that.
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime, timezone
 
 from .backtest import run_backtest
 from .commentary import generate_analysis_commentary, generate_signal_commentary
@@ -30,6 +30,10 @@ from .trade_levels import compute_trade_levels
 
 # Every timeframe we predict on (1-minute deliberately excluded — too noisy).
 PREDICTION_TIMEFRAMES = ["5min", "15min", "30min", "1h", "4h", "1day"]
+# How many minutes each candle period lasts — a signal is considered stale once
+# this many minutes have elapsed since it was generated, so a 30min signal is
+# always based on the most recent 30-minute candle, not morning's analysis.
+TF_MINUTES: dict[str, int] = {"5min": 5, "15min": 15, "30min": 30, "1h": 60, "4h": 240, "1day": 1440}
 # Higher timeframes used for the premium multi-timeframe agreement gate.
 HIGHER_TIMEFRAMES = ["1h", "4h", "1day"]
 # Minimum confluence for a setup to be published as a signal at all. With the
@@ -201,84 +205,135 @@ def _tier(tf: str, direction: str, mtf: dict, news: dict) -> str:
     return "standard"
 
 
+def _upsert_signal(
+    symbol: str, tf: str, today: str, analysis: dict, levels: dict, tier: str,
+    bt: dict, news: dict, commentary: str,
+) -> int:
+    """INSERT OR REPLACE the signal for (symbol, date, interval), returning the row id."""
+    with db_session() as conn:
+        cur = conn.execute(
+            "INSERT OR REPLACE INTO signals "
+            "(symbol, date, direction, confluence_score, reasoning_json, "
+            "backtest_hit_rate, timeframes_agreed, news_sentiment, interval, tier, "
+            "entry, stop_loss, take_profit, risk_reward, generated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+            (
+                symbol, today,
+                analysis["direction"],
+                analysis["confluence_score"],
+                json.dumps({
+                    "factors": analysis["factors"],
+                    "indicator_signals": analysis["indicator_signals"],
+                    "patterns": analysis["patterns"],
+                    "strategies": analysis.get("strategies", []),
+                    "strategy_agreement": analysis.get("strategy_agreement"),
+                    "commentary": commentary,
+                    "news_headlines": news["headlines"],
+                }),
+                bt["hit_rate"],
+                json.dumps(list(HIGHER_TIMEFRAMES)) if tier == "premium" else None,
+                news["sentiment"],
+                tf, tier,
+                levels["entry"], levels["stop_loss"], levels["take_profit"], levels["risk_reward"],
+            ),
+        )
+    return cur.lastrowid
+
+
+def _scan_symbol_for_intervals(symbol: str, intervals: list[str], today: str) -> None:
+    """Re-analyse symbol on the given intervals and upsert fresh signals."""
+    news = get_news_sentiment(symbol)
+    mtf = _mtf_from_higher(symbol)
+
+    for tf in intervals:
+        analysis = analyze_symbol(symbol, tf)
+        if analysis["direction"] == "neutral" or analysis["confluence_score"] < MIN_CONFLUENCE:
+            # Setup dissolved — remove the stale signal so it doesn't mislead.
+            with db_session() as conn:
+                conn.execute("DELETE FROM signals WHERE symbol=? AND date=? AND interval=?", (symbol, today, tf))
+            continue
+
+        levels = compute_trade_levels(
+            analysis["direction"], analysis["close"], analysis["atr"],
+            analysis["patterns"], analysis["confluence_score"]
+        )
+        if levels is None:
+            with db_session() as conn:
+                conn.execute("DELETE FROM signals WHERE symbol=? AND date=? AND interval=?", (symbol, today, tf))
+            continue
+
+        tier = _tier(tf, analysis["direction"], mtf, news)
+        df = get_candles(symbol, interval=tf, count=300, refresh=False)
+        bt = run_backtest(df, interval=tf)
+        if (
+            bt["hit_rate"] is not None
+            and bt["total_signals"] >= MIN_BACKTEST_SAMPLE
+            and bt["hit_rate"] < MIN_PUBLISH_HIT_RATE
+        ):
+            with db_session() as conn:
+                conn.execute("DELETE FROM signals WHERE symbol=? AND date=? AND interval=?", (symbol, today, tf))
+            continue
+
+        commentary = generate_signal_commentary(symbol, tf, analysis["direction"], analysis["factors"], tier, news)
+        _upsert_signal(symbol, tf, today, analysis, levels, tier, bt, news, commentary)
+
+
+def refresh_stale_signals() -> None:
+    """Re-scan any (symbol, interval) whose signal is older than one candle
+    period for that interval. Called automatically by get_today_signal() so
+    callers always receive fresh data without a manual trigger."""
+    today = date.today().isoformat()
+    now = datetime.now(timezone.utc)
+
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT symbol, interval, generated_at FROM signals WHERE date = ?", (today,)
+        ).fetchall()
+
+    # Map (symbol, interval) → most-recent generated_at for today
+    freshness: dict[tuple[str, str], datetime] = {}
+    for r in rows:
+        key = (r["symbol"], r["interval"])
+        ts_str = r["generated_at"]
+        try:
+            ts = datetime.fromisoformat(ts_str).replace(tzinfo=timezone.utc)
+        except Exception:
+            ts = datetime.min.replace(tzinfo=timezone.utc)
+        if key not in freshness or ts > freshness[key]:
+            freshness[key] = ts
+
+    # Collect which (symbol, interval) pairs need a refresh
+    needs_refresh: dict[str, list[str]] = {}
+    for symbol in SYMBOLS:
+        for tf in PREDICTION_TIMEFRAMES:
+            tf_mins = TF_MINUTES.get(tf, 1440)
+            last = freshness.get((symbol, tf))
+            age_mins = (now - last).total_seconds() / 60 if last else tf_mins + 1
+            if age_mins >= tf_mins:
+                needs_refresh.setdefault(symbol, []).append(tf)
+
+    for symbol, intervals in needs_refresh.items():
+        _scan_symbol_for_intervals(symbol, intervals, today)
+
+
 def run_daily_signal_scan(symbols: list[str] | None = None) -> list[dict]:
+    """Full scan across all symbols and timeframes. Wipes today's existing
+    signals first so re-running is idempotent (startup / manual trigger)."""
     symbols = symbols or SYMBOLS
     today = date.today().isoformat()
 
-    # regenerate today's signals from scratch so re-running is idempotent
     with db_session() as conn:
         conn.execute("DELETE FROM signals WHERE date = ?", (today,))
 
-    stored = []
     for symbol in symbols:
-        news = get_news_sentiment(symbol)
-        mtf = _mtf_from_higher(symbol)
+        _scan_symbol_for_intervals(symbol, list(PREDICTION_TIMEFRAMES), today)
 
-        for tf in PREDICTION_TIMEFRAMES:
-            analysis = analyze_symbol(symbol, tf)
-            if analysis["direction"] == "neutral" or analysis["confluence_score"] < MIN_CONFLUENCE:
-                continue
-
-            levels = compute_trade_levels(
-                analysis["direction"], analysis["close"], analysis["atr"], analysis["patterns"], analysis["confluence_score"]
-            )
-            if levels is None:
-                continue
-
-            tier = _tier(tf, analysis["direction"], mtf, news)
-            df = get_candles(symbol, interval=tf, count=300, refresh=False)
-            bt = run_backtest(df, interval=tf)
-            # Quality floor: if this rule has a real measured track record on
-            # this timeframe and it's worse than a coin flip minus margin,
-            # don't publish it — accuracy over volume. Setups without enough
-            # history still publish (shown as "not enough history yet").
-            if (
-                bt["hit_rate"] is not None
-                and bt["total_signals"] >= MIN_BACKTEST_SAMPLE
-                and bt["hit_rate"] < MIN_PUBLISH_HIT_RATE
-            ):
-                continue
-            commentary = generate_signal_commentary(symbol, tf, analysis["direction"], analysis["factors"], tier, news)
-
-            with db_session() as conn:
-                cur = conn.execute(
-                    "INSERT INTO signals (symbol, date, direction, confluence_score, reasoning_json, "
-                    "backtest_hit_rate, timeframes_agreed, news_sentiment, interval, tier, "
-                    "entry, stop_loss, take_profit, risk_reward) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        symbol,
-                        today,
-                        analysis["direction"],
-                        analysis["confluence_score"],
-                        json.dumps(
-                            {
-                                "factors": analysis["factors"],
-                                "indicator_signals": analysis["indicator_signals"],
-                                "patterns": analysis["patterns"],
-                                "strategies": analysis.get("strategies", []),
-                                "strategy_agreement": analysis.get("strategy_agreement"),
-                                "commentary": commentary,
-                                "news_headlines": news["headlines"],
-                            }
-                        ),
-                        bt["hit_rate"],
-                        json.dumps(list(HIGHER_TIMEFRAMES)) if tier == "premium" else None,
-                        news["sentiment"],
-                        tf,
-                        tier,
-                        levels["entry"],
-                        levels["stop_loss"],
-                        levels["take_profit"],
-                        levels["risk_reward"],
-                    ),
-                )
-                stored.append({"id": cur.lastrowid, "symbol": symbol, "interval": tf, "tier": tier})
-
-    return get_today_signal()
+    return get_today_signal(skip_refresh=True)
 
 
-def get_today_signal() -> list[dict]:
+def get_today_signal(skip_refresh: bool = False) -> list[dict]:
+    if not skip_refresh:
+        refresh_stale_signals()
     today = date.today().isoformat()
     with db_session() as conn:
         rows = conn.execute(

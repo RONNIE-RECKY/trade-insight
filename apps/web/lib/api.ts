@@ -48,6 +48,7 @@ export type Signal = {
   take_profit?: number | null;
   risk_reward?: number | null;
   composite_score?: number;
+  generated_at?: string | null;
   already_executed?: boolean;
   executed_at?: string | null;
   reasoning: {
