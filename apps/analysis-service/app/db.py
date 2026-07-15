@@ -206,7 +206,12 @@ _MIGRATIONS = [
     ("auto_trades", "confirm_token", "TEXT"),
     ("auto_trades", "confirm_expires_at", "TEXT"),
     ("auto_trades", "confirmed_at", "TEXT"),
-    ("signals", "generated_at", "TEXT NOT NULL DEFAULT (datetime('now'))"),
+    # NOTE: SQLite rejects ADD COLUMN with a non-constant default like
+    # datetime('now') — using one here makes the migration silently no-op
+    # (the OperationalError is treated as "column exists") and every signal
+    # insert then fails inside the never-500 guards. Plain nullable TEXT;
+    # the insert always supplies the value and readers treat NULL as stale.
+    ("signals", "generated_at", "TEXT"),
 ]
 
 # DDL statements run once, idempotent (IF NOT EXISTS / OR IGNORE guards).

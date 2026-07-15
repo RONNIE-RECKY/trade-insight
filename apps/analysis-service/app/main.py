@@ -79,7 +79,7 @@ def _seed_admin():
 
 
 def _prewarm_signals():
-    if not get_today_signal():
+    if not get_today_signal(skip_refresh=True):
         _scan_in_background()  # shares the lock so it can't collide with a request-triggered scan
 
 
@@ -331,14 +331,21 @@ import threading as _threading
 _scan_lock = _threading.Lock()
 
 
-def _scan_in_background() -> bool:
-    """Start a daily scan on a worker thread unless one is already running."""
+def _scan_in_background(full: bool = True) -> bool:
+    """Run a scan on a worker thread unless one is already running.
+    full=True wipes and regenerates today's signals; full=False only
+    re-analyses the (symbol, timeframe) pairs whose signals have gone stale."""
     if not _scan_lock.acquire(blocking=False):
         return False
 
     def _run():
         try:
-            run_daily_signal_scan()
+            if full:
+                run_daily_signal_scan()
+            else:
+                from .signal_job import refresh_stale_signals
+
+                refresh_stale_signals()
         finally:
             _scan_lock.release()
 
@@ -348,11 +355,14 @@ def _scan_in_background() -> bool:
 
 @app.get("/signals/today")
 def get_signals_today_route(symbol: str | None = None, x_user_id: int | None = Header(default=None)):
-    signals = get_today_signal()
+    # skip_refresh: the staleness refresh scans in-process and can take
+    # minutes — serve whatever is stored NOW and refresh in the background
+    signals = get_today_signal(skip_refresh=True)
     plan = user_plan(x_user_id)
     if not signals:
-        _scan_in_background()
+        _scan_in_background(full=True)
         return {"signals": [], "plan": plan, "generating": True}
+    _scan_in_background(full=False)  # keep stale pairs fresh without blocking
     gated = _apply_plan_gate(signals, plan, symbol)
     return {"signals": _mark_already_executed(gated, x_user_id), "plan": plan}
 
@@ -466,4 +476,5 @@ def public_signals_api(api_key: str):
         row = conn.execute("SELECT plan, is_admin FROM users WHERE api_key = ?", (api_key,)).fetchone()
     if not row or (row["plan"] != "platinum" and not row["is_admin"]):
         raise HTTPException(status_code=401, detail="invalid or non-Platinum API key")
-    return {"signals": get_today_signal(), "count": len(get_today_signal())}
+    signals = get_today_signal(skip_refresh=True)
+    return {"signals": signals, "count": len(signals)}

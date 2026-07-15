@@ -98,11 +98,14 @@ def _tradeable(sig: dict) -> bool:
 
 def _open_from_signals(user_id: int, settings: dict) -> None:
     """Auto-open simulated positions from today's qualifying signals."""
-    from .signal_job import get_today_signal, run_daily_signal_scan
+    from .signal_job import get_today_signal
 
-    signals = get_today_signal()
-    if not signals:  # nothing scanned yet today — generate now so the bot has something to trade
-        signals = run_daily_signal_scan()
+    # never scan inline — this runs inside the /auto-trade/positions request;
+    # the signals page / boot prewarm kicks the multi-minute scan off in the
+    # background, and the bot simply picks the signals up on a later sync
+    signals = get_today_signal(skip_refresh=True)
+    if not signals:
+        return
 
     candidates = [s for s in signals if _tradeable(s)]
     if settings["only_high_confidence"]:

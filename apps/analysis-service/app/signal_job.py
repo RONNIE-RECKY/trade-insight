@@ -334,6 +334,10 @@ def run_daily_signal_scan(symbols: list[str] | None = None) -> list[dict]:
     """Full scan across all symbols and timeframes. Wipes today's existing
     signals first so re-running is idempotent (startup / manual trigger)."""
     symbols = symbols or SYMBOLS
+    # gold first: it's the flagship (and the free plan's only symbol), and
+    # signals store incrementally — so the page shows gold within a couple of
+    # minutes instead of after the whole multi-minute scan
+    symbols = sorted(symbols, key=lambda s: s != "XAUUSD")
     today = date.today().isoformat()
 
     with db_session() as conn:
@@ -385,7 +389,7 @@ def get_signal_of_the_day() -> dict | None:
     """
     # never scans inline — the caller (main.py) kicks the scan off in the
     # background when today's table is empty, because a full scan takes minutes
-    signals = get_today_signal()
+    signals = get_today_signal(skip_refresh=True)
 
     candidates = [s for s in signals if s["direction"] != "neutral" and s.get("entry") is not None]
     if not candidates:
