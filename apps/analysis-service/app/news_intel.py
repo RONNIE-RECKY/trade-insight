@@ -62,6 +62,16 @@ _KNOWN_CPI_DATES_2026 = {
     1: 13, 2: 11, 3: 11, 4: 10, 5: 12, 6: 10,
     7: 14, 8: 12, 9: 11, 10: 13, 11: 12, 12: 10,
 }
+# Approx PPI release days (usually the day after CPI; fixture path only).
+_KNOWN_PPI_DATES_2026 = {
+    1: 14, 2: 12, 3: 12, 4: 13, 5: 13, 6: 11,
+    7: 15, 8: 13, 9: 12, 10: 14, 11: 13, 12: 11,
+}
+# Approx US retail sales days (mid-month; fixture path only).
+_KNOWN_RETAIL_DATES_2026 = {
+    1: 16, 2: 17, 3: 17, 4: 15, 5: 15, 6: 16,
+    7: 16, 8: 14, 9: 16, 10: 16, 11: 17, 12: 15,
+}
 
 
 def _now() -> datetime:
@@ -92,12 +102,12 @@ def _fixture_events(window_start: datetime, window_end: datetime) -> list[dict]:
         # NFP — first Friday 13:30 UTC
         nfp = _first_friday(yr, mo)
         events.append({"code": "NFP", "time": nfp})
-        # CPI — known/approx day 13:30 UTC
-        cpi_day = _KNOWN_CPI_DATES_2026.get(mo, 12)
-        try:
-            events.append({"code": "CPI", "time": datetime(yr, mo, cpi_day, 13, 30, tzinfo=timezone.utc)})
-        except ValueError:
-            pass
+        # CPI / PPI / retail sales — known/approx days, 13:30 UTC
+        for code, days in (("CPI", _KNOWN_CPI_DATES_2026), ("PPI", _KNOWN_PPI_DATES_2026), ("RETAIL", _KNOWN_RETAIL_DATES_2026)):
+            try:
+                events.append({"code": code, "time": datetime(yr, mo, days.get(mo, 13), 13, 30, tzinfo=timezone.utc)})
+            except ValueError:
+                pass
 
     # FOMC — known dates 19:00 UTC (14:00 ET)
     for ds in _KNOWN_FOMC_DATES:

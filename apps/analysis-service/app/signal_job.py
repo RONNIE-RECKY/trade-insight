@@ -383,9 +383,9 @@ def get_signal_of_the_day() -> dict | None:
     No timeframe is preferred over another; a clean 5-minute setup can win
     over a noisy daily one if its real numbers are better.
     """
+    # never scans inline — the caller (main.py) kicks the scan off in the
+    # background when today's table is empty, because a full scan takes minutes
     signals = get_today_signal()
-    if not signals:
-        signals = run_daily_signal_scan()
 
     candidates = [s for s in signals if s["direction"] != "neutral" and s.get("entry") is not None]
     if not candidates:

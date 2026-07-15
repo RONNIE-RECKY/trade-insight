@@ -80,7 +80,7 @@ def _seed_admin():
 
 def _prewarm_signals():
     if not get_today_signal():
-        run_daily_signal_scan()
+        _scan_in_background()  # shares the lock so it can't collide with a request-triggered scan
 
 
 app = FastAPI(title="Trade Insight Analysis Service", lifespan=lifespan)
@@ -321,12 +321,38 @@ def _mark_already_executed(signals: list[dict], user_id: int | None) -> list[dic
     return signals
 
 
+# The full scan (10 symbols x 6 timeframes x 11-strategy backtests) takes
+# minutes — it must NEVER run inline on a request or the frontend times out
+# and the signals page looks empty. If today's table is empty we kick the scan
+# off on a background thread (once) and return immediately; the page's 2-minute
+# auto-refresh picks the signals up when the scan lands.
+import threading as _threading
+
+_scan_lock = _threading.Lock()
+
+
+def _scan_in_background() -> bool:
+    """Start a daily scan on a worker thread unless one is already running."""
+    if not _scan_lock.acquire(blocking=False):
+        return False
+
+    def _run():
+        try:
+            run_daily_signal_scan()
+        finally:
+            _scan_lock.release()
+
+    _threading.Thread(target=_run, daemon=True).start()
+    return True
+
+
 @app.get("/signals/today")
 def get_signals_today_route(symbol: str | None = None, x_user_id: int | None = Header(default=None)):
     signals = get_today_signal()
-    if not signals:
-        signals = run_daily_signal_scan()
     plan = user_plan(x_user_id)
+    if not signals:
+        _scan_in_background()
+        return {"signals": [], "plan": plan, "generating": True}
     gated = _apply_plan_gate(signals, plan, symbol)
     return {"signals": _mark_already_executed(gated, x_user_id), "plan": plan}
 
@@ -344,6 +370,7 @@ def get_signal_of_the_day_route(x_user_id: int | None = Header(default=None)):
     sotd = get_signal_of_the_day()
     plan = user_plan(x_user_id)
     if sotd is None:
+        _scan_in_background()  # today's table is empty — generate without blocking
         return {"signal": None, "plan": plan}
 
     caps = capabilities(plan)
