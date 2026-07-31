@@ -84,7 +84,7 @@ PLANS = {
             "Up to 40 signals per day",
             "Premium multi-timeframe signals",
             "High-confidence (80%+ backtested) highlights",
-            "6-strategy consensus + news filtering",
+            "11-strategy consensus + news filtering",
             "Automated bot — connect a demo account for live execution",
             "Full backtest history per rule",
             "50 chart uploads / month — AI pattern detection",

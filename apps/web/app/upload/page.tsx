@@ -104,7 +104,7 @@ function UploadInner() {
         <h1 className="text-lg font-semibold text-neutral-100">Chart upload &amp; analysis</h1>
         <p className="text-sm text-neutral-500 mt-1">
           Upload a chart screenshot — we extract the candles from the image and run the same pattern detection
-          and 6-strategy analysis used elsewhere on the platform.
+          and 11-strategy analysis used elsewhere on the platform.
         </p>
       </div>
 

@@ -81,7 +81,7 @@ function ProductMockup() {
         </div>
         <div className="border-t border-neutral-800 px-4 py-3">
           <p className="text-[11px] text-neutral-400">
-            <span className="text-cyan-300">5/6 strategies</span> agree · backtested hit-rate shown per signal
+            <span className="text-cyan-300">8/11 strategies</span> agree · backtested hit-rate shown per signal
           </p>
         </div>
       </div>
@@ -153,7 +153,7 @@ export default function LandingPage() {
             </h1>
             <p className="mt-5 max-w-xl text-base text-neutral-400 sm:text-lg lg:mx-0 mx-auto">
               Forex, gold and crypto signals across six timeframes — each one combining{" "}
-              <span className="text-neutral-200">six trading strategies</span> with concrete entry, stop-loss
+              <span className="text-neutral-200">eleven trading strategies</span> with concrete entry, stop-loss
               and take-profit levels and its own <span className="text-neutral-200">real backtested hit-rate</span>.
             </p>
             <div className="mt-8 flex items-center justify-center gap-3 lg:justify-start">
@@ -236,7 +236,7 @@ export default function LandingPage() {
           <div className="grid grid-cols-3 gap-2 p-2">
             {[
               { l: "Win rate", v: "backtested" },
-              { l: "Strategies", v: "6 / vote" },
+              { l: "Strategies", v: "11 / vote" },
               { l: "Auto-bot", v: "running" },
             ].map((k) => (
               <div key={k.l} className="rounded-lg border border-neutral-800 bg-neutral-950/60 px-3 py-2 text-center">

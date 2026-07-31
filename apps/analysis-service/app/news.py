@@ -38,8 +38,40 @@ _CURRENCY_KEYWORDS = {
     "ETH": ["ethereum", "ether", "eth"],
 }
 
-_POSITIVE_WORDS = ["rallies", "rises", "strengthens", "surges", "beats expectations", "optimistic", "rate hike", "growth", "upbeat"]
-_NEGATIVE_WORDS = ["falls", "weakens", "drops", "slumps", "misses expectations", "pessimistic", "rate cut", "recession", "downbeat"]
+# Sentiment lexicon: price-action words plus the FUNDAMENTALS vocabulary that
+# actually moves FX/gold — central-bank stance (hawkish/dovish, hiking/easing),
+# inflation and labour-market surprises, yields and risk appetite. Scoring is
+# from the CURRENCY's perspective (hawkish/strong data = currency-positive);
+# get_news_sentiment then inverts quote-currency scores for the pair, so e.g.
+# a hawkish-Fed headline is USD-positive and therefore bearish for XAUUSD.
+_POSITIVE_WORDS = [
+    # price action
+    "rallies", "rises", "strengthens", "surges", "climbs", "jumps", "rebounds", "upbeat",
+    # central-bank stance / policy
+    "rate hike", "raises rates", "hawkish", "tightening", "higher for longer",
+    # data surprises / economy
+    "beats expectations", "better than expected", "strong jobs", "jobs beat",
+    "growth", "expansion", "optimistic", "resilient", "hot inflation", "inflation rises",
+    "yields rise", "yields climb",
+]
+_NEGATIVE_WORDS = [
+    # price action
+    "falls", "weakens", "drops", "slumps", "tumbles", "slides", "plunges", "downbeat",
+    # central-bank stance / policy
+    "rate cut", "cuts rates", "dovish", "easing", "pause in tightening", "pivot",
+    # data surprises / economy
+    "misses expectations", "worse than expected", "weak jobs", "jobs miss",
+    "recession", "contraction", "pessimistic", "slowdown", "inflation cools",
+    "inflation eases", "yields fall", "yields drop",
+]
+# Gold-only extras: gold is a safe-haven, so risk-off language is bullish for
+# XAU even though it isn't "positive" for any currency. Applied only to
+# headlines matched on the XAU side.
+_GOLD_BULLISH_WORDS = [
+    "safe haven", "risk-off", "geopolitical tension", "uncertainty", "flight to safety",
+    "dollar weakens", "central bank buying", "haven demand",
+]
+_GOLD_BEARISH_WORDS = ["risk-on", "risk appetite", "dollar strengthens", "profit-taking in gold"]
 
 _FIXTURE_HEADLINES = [
     "Dollar strengthens as Fed signals rate hike path stays on track",
@@ -64,7 +96,7 @@ def _symbol_currencies(symbol: str) -> list[str]:
     return []
 
 
-def _score_headline(headline: str) -> int:
+def _score_headline(headline: str, gold: bool = False) -> int:
     text = headline.lower()
     score = 0
     for word in _POSITIVE_WORDS:
@@ -73,6 +105,13 @@ def _score_headline(headline: str) -> int:
     for word in _NEGATIVE_WORDS:
         if word in text:
             score -= 1
+    if gold:  # safe-haven / risk-appetite vocabulary only applies to XAU
+        for word in _GOLD_BULLISH_WORDS:
+            if word in text:
+                score += 1
+        for word in _GOLD_BEARISH_WORDS:
+            if word in text:
+                score -= 1
     return score
 
 
@@ -115,7 +154,8 @@ def _fetch_sentiment(symbol: str) -> dict:
         matched_quote = any(kw in text for kw in quote_keywords)
         if not matched_base and not matched_quote:
             continue
-        score = _score_headline(headline)
+        gold_side = matched_base and currencies and currencies[0] == "XAU"
+        score = _score_headline(headline, gold=gold_side)
         pair_contribution = score if matched_base else -score
         relevant.append({"headline": headline, "score": score, "currency_side": "base" if matched_base else "quote"})
         pair_score += pair_contribution
