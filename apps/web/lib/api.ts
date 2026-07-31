@@ -57,6 +57,22 @@ export type Signal = {
     patterns: Pattern[];
     commentary?: string;
     news_headlines?: NewsHeadline[];
+    sniper?: SniperCheck | null;
+  };
+};
+
+// Sniper entry: the platform's strictest tag — every criterion must pass at
+// once. `criteria` mirrors the backend's transparent per-condition booleans.
+export type SniperCheck = {
+  qualified: boolean;
+  criteria: {
+    majority_confluence: boolean;
+    market_structure_aligned: boolean;
+    level_strategy_aligned: boolean;
+    candlestick_trigger: boolean;
+    news_aligned: boolean;
+    proven_hit_rate: boolean;
+    price_at_entry: boolean;
   };
 };
 
@@ -113,6 +129,7 @@ export type FullAnalysis = {
   meets_target?: boolean;
   target_accuracy?: number;
   candle_count: number;
+  sniper?: SniperCheck;
 };
 
 export type MultiTimeframe = {

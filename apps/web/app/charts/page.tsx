@@ -367,6 +367,14 @@ function ChartsPageInner() {
                   Bot analysis <span className="text-neutral-500 font-normal">({interval})</span>
                 </h2>
                 <div className="flex items-center gap-2">
+                  {report.sniper?.qualified && (
+                    <span
+                      title="Sniper entry: majority confluence incl. market structure + a level strategy + candlestick trigger, news aligned, 55%+ measured hit-rate, and price at the entry right now."
+                      className="text-xs font-semibold uppercase tracking-wide px-2.5 py-1 rounded-full text-amber-300 bg-amber-500/10 border border-amber-500/30"
+                    >
+                      sniper entry
+                    </span>
+                  )}
                   <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${confidenceBadgeClass(report.confidence)}`}>
                     {report.confidence ?? "low"} confidence
                   </span>

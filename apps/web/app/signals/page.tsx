@@ -112,6 +112,14 @@ function SignalCard({
               premium
             </span>
           )}
+          {signal.reasoning?.sniper?.qualified && (
+            <span
+              title="Sniper entry: majority confluence incl. market structure + a level strategy + candlestick trigger, news aligned, 55%+ measured hit-rate, and price at the entry right now. Tight 0.6-ATR stop, 1:3 R:R."
+              className="text-[10px] font-semibold uppercase tracking-wide text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-1.5 py-0.5"
+            >
+              sniper
+            </span>
+          )}
           <SignalAge generatedAt={signal.generated_at} interval={signal.interval} />
         </h3>
         <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${directionBadgeClass(signal.direction)}`}>

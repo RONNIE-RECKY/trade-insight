@@ -58,6 +58,60 @@ HIGH_CONFIDENCE_TARGET = 0.80
 MIN_PUBLISH_HIT_RATE = 0.40
 MIN_BACKTEST_SAMPLE = 10
 
+# ── Sniper entry: the strictest tag on the platform ──────────────────────────
+# A signal is a "sniper entry" only when EVERYTHING lines up at once:
+# majority confluence including the structure read + a level strategy + a
+# candlestick trigger, news not fighting it, a measured hit-rate above 55%,
+# and price sitting ON the entry right now (within 0.3 ATR) so it's
+# immediately actionable. Sniper entries get a tightened stop (0.6 ATR)
+# and a 1:3 reward target. Rare by design — precision over frequency.
+SNIPER_MIN_CONFLUENCE = 6
+SNIPER_MIN_HIT_RATE = 0.55
+SNIPER_MAX_ENTRY_DIST_ATR = 0.3
+SNIPER_STOP_ATR = 0.6
+SNIPER_RR = 3.0
+_SNIPER_LEVEL_STRATEGIES = ("Trendline", "Psychological level", "Fibonacci", "Breakout")
+
+
+def sniper_check(analysis: dict, levels: dict | None, bt: dict, news: dict) -> dict:
+    """Evaluate the sniper-entry criteria. Returns {qualified, criteria} where
+    `criteria` shows exactly which conditions passed/failed — same transparency
+    rule as everything else: the tag is auditable, never a black box."""
+    factors = analysis.get("factors", []) or []
+    direction = analysis.get("direction")
+    hit = bt.get("hit_rate")
+    samples = bt.get("total_signals", 0)
+    atr = analysis.get("atr")
+    close = analysis.get("close")
+
+    at_entry = False
+    if levels is not None and atr and close is not None:
+        at_entry = abs(close - levels["entry"]) <= SNIPER_MAX_ENTRY_DIST_ATR * atr
+
+    criteria = {
+        "majority_confluence": analysis.get("confluence_score", 0) >= SNIPER_MIN_CONFLUENCE,
+        "market_structure_aligned": "Market structure" in factors,
+        "level_strategy_aligned": any(f in factors for f in _SNIPER_LEVEL_STRATEGIES),
+        "candlestick_trigger": "Candlestick" in factors,
+        "news_aligned": news.get("sentiment") in ("neutral", direction),
+        "proven_hit_rate": hit is not None and samples >= MIN_BACKTEST_SAMPLE and hit >= SNIPER_MIN_HIT_RATE,
+        "price_at_entry": at_entry,
+    }
+    return {"qualified": direction in ("bullish", "bearish") and all(criteria.values()), "criteria": criteria}
+
+
+def apply_sniper_levels(levels: dict, direction: str, atr: float) -> dict:
+    """Tighten a qualifying signal's stop to 0.6 ATR and target 3R."""
+    entry = levels["entry"]
+    risk = SNIPER_STOP_ATR * atr
+    if direction == "bullish":
+        sl, tp = entry - risk, entry + risk * SNIPER_RR
+    else:
+        sl, tp = entry + risk, entry - risk * SNIPER_RR
+    nd = 5
+    return {**levels, "stop_loss": round(sl, nd), "take_profit": round(tp, nd),
+            "risk": round(risk, nd), "risk_reward": SNIPER_RR}
+
 
 def analyze_symbol(symbol: str, interval: str = "1day") -> dict:
     df = get_candles(symbol, interval=interval, count=300)
@@ -161,6 +215,9 @@ def full_analysis(symbol: str, interval: str) -> dict:
         "meets_target": meets_target,
         "target_accuracy": HIGH_CONFIDENCE_TARGET,
         "candle_count": len(df),
+        "sniper": sniper_check(
+            {**result, "atr": atr, "close": close}, levels, bt, news
+        ),
     }
 
 
@@ -213,7 +270,7 @@ def _tier(tf: str, direction: str, mtf: dict, news: dict) -> str:
 
 def _upsert_signal(
     symbol: str, tf: str, today: str, analysis: dict, levels: dict, tier: str,
-    bt: dict, news: dict, commentary: str,
+    bt: dict, news: dict, commentary: str, sniper: dict | None = None,
 ) -> int:
     """INSERT OR REPLACE the signal for (symbol, date, interval), returning the row id."""
     with db_session() as conn:
@@ -235,6 +292,7 @@ def _upsert_signal(
                     "strategy_agreement": analysis.get("strategy_agreement"),
                     "commentary": commentary,
                     "news_headlines": news["headlines"],
+                    "sniper": sniper,
                 }),
                 bt["hit_rate"],
                 json.dumps(list(HIGHER_TIMEFRAMES)) if tier == "premium" else None,
@@ -285,8 +343,12 @@ def _scan_symbol_for_intervals(symbol: str, intervals: list[str], today: str) ->
                 conn.execute("DELETE FROM signals WHERE symbol=? AND date=? AND interval=?", (symbol, today, tf))
             continue
 
+        sniper = sniper_check(analysis, levels, bt, news)
+        if sniper["qualified"] and analysis.get("atr"):
+            levels = apply_sniper_levels(levels, analysis["direction"], analysis["atr"])
+
         commentary = generate_signal_commentary(symbol, tf, analysis["direction"], analysis["factors"], tier, news)
-        _upsert_signal(symbol, tf, today, analysis, levels, tier, bt, news, commentary)
+        _upsert_signal(symbol, tf, today, analysis, levels, tier, bt, news, commentary, sniper)
 
 
 def refresh_stale_signals() -> None:
