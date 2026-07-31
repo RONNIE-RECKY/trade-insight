@@ -157,6 +157,45 @@ export function NewsIntel({ userId }: { userId: number | null }) {
         </p>
       )}
 
+      {(data.secondary_intel?.length ?? 0) > 0 && (
+        <div className="pt-3 border-t border-neutral-800 space-y-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+            Also this week — high impact
+          </p>
+          {data.secondary_intel!.map((s) => (
+            <div
+              key={s.event.code + s.event.time}
+              className="flex items-center justify-between flex-wrap gap-2 bg-neutral-950/60 border border-neutral-800 rounded-lg px-3 py-2"
+            >
+              <div>
+                <p className="text-sm font-medium text-neutral-100">
+                  {s.event.name}
+                  <span className="ml-2 text-[10px] uppercase text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded px-1.5 py-0.5">
+                    high impact
+                  </span>
+                </p>
+                <p className="text-[11px] text-neutral-500">
+                  {countdown(s.event.time)} · {new Date(s.event.time).toLocaleString()}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {s.direction !== "neutral" && s.probability != null && (
+                  <span className="text-sm font-mono font-semibold text-neutral-100">
+                    {(s.probability * 100).toFixed(0)}%
+                  </span>
+                )}
+                <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${directionBadgeClass(s.direction)}`}>
+                  {s.direction === "neutral" ? "no read yet" : s.direction}
+                </span>
+              </div>
+            </div>
+          ))}
+          <p className="text-[10px] text-neutral-600">
+            Same current-chart read applied to each event — re-checked automatically as the event gets close.
+          </p>
+        </div>
+      )}
+
       {tr && tr.graded > 0 && (
         <div className="pt-2 border-t border-neutral-800 text-xs text-neutral-500">
           Track record (measured, not claimed):{" "}

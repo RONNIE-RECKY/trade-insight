@@ -241,9 +241,14 @@ def _probability(analysis: dict) -> float | None:
     return round(max(0.0, min(1.0, prob)), 4)
 
 
-def generate_event_intel(event: dict, store: bool = True) -> dict:
-    """Run the full XAU/USD engine for one event and build the prediction."""
-    analysis = full_analysis(SYMBOL, EVENT_TIMEFRAME)
+def generate_event_intel(event: dict, store: bool = True, analysis: dict | None = None) -> dict:
+    """Run the full XAU/USD engine for one event and build the prediction.
+    Pass a precomputed `analysis` to attach the same current chart read to
+    several events (e.g. claims + NFP in the same week) without re-running
+    the multi-second engine per event — the read is of the CURRENT chart
+    either way, so recomputing would return identical numbers."""
+    if analysis is None:
+        analysis = full_analysis(SYMBOL, EVENT_TIMEFRAME)
     prob = _probability(analysis)
     try:
         price_now = get_live_price(SYMBOL)["price"]
@@ -321,10 +326,45 @@ def get_news_intel() -> dict:
         focus = upcoming[0] if upcoming else (events[-1] if events else None)
 
     intel = generate_event_intel(focus, store=False) if focus else None
+
+    # High-impact events (NFP, CPI, FOMC, Powell) coming up within 7 days that
+    # AREN'T the focus get their own prediction row below the main card — so a
+    # Thursday claims focus never hides Friday's NFP. Reuses the focus
+    # analysis: it's the same current-chart read, recomputing would only
+    # duplicate the numbers and the latency.
+    secondary = []
+    if intel is not None:
+        shared_analysis = None
+        for e in events:
+            if e is focus or e.get("impact") != "high":
+                continue
+            et = datetime.fromisoformat(e["time"])
+            if not (0 <= (et - now).total_seconds() <= 7 * 86400):
+                continue
+            if shared_analysis is None:
+                # rebuild the analysis dict from the focus intel fields
+                shared_analysis = {
+                    "direction": intel["direction"],
+                    "confidence": intel.get("confidence"),
+                    "backtest_hit_rate": intel.get("backtest_hit_rate"),
+                    "backtest_sample_size": intel.get("backtest_sample_size"),
+                    "confluence_score": intel.get("confluence_score"),
+                    "strategy_agreement": intel.get("strategy_agreement"),
+                    "strategies": intel.get("strategies"),
+                    "news_sentiment": intel.get("news_sentiment"),
+                    "news_headlines": intel.get("news_headlines"),
+                    "levels": intel.get("levels"),
+                    "commentary": intel.get("commentary"),
+                }
+            secondary.append(generate_event_intel(e, store=False, analysis=shared_analysis))
+            if len(secondary) >= 2:
+                break
+
     return {
         "focus_event": focus,
         "upcoming_events": events,
         "intel": intel,
+        "secondary_intel": secondary,
         "track_record": accuracy_record(),
     }
 

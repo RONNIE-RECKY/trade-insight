@@ -440,6 +440,9 @@ export type NewsIntel = {
   focus_event?: GoldEvent | null;
   upcoming_events?: GoldEvent[];
   intel?: NewsIntelPrediction | null;
+  // high-impact events (e.g. NFP) within 7 days that aren't the focus —
+  // shown as compact prediction rows under the main card
+  secondary_intel?: NewsIntelPrediction[];
   track_record?: NewsIntelTrackRecord;
 };
 
