@@ -215,6 +215,15 @@ function SignalsPageInner() {
   }, [today, premiumOnly]);
   const premiumCount = today.filter((s) => s.tier === "premium").length;
 
+  // Signals that already FIRED (the bot opened a position from them) leave the
+  // actionable Today feed and surface at the top of History instead — deduped,
+  // still carrying their "already executed" badge — so nothing just vanishes.
+  const historyWithFired = useMemo(() => {
+    const fired = today.filter((s) => s.already_executed);
+    const firedIds = new Set(fired.map((s) => s.id));
+    return [...fired, ...history.filter((h) => !firedIds.has(h.id))];
+  }, [today, history]);
+
   const sotdSection = sotd && (
     <section>
       <div className="mb-3">
@@ -334,9 +343,13 @@ function SignalsPageInner() {
       </section>
 
       <section>
-        <h2 className="text-lg font-semibold text-neutral-100 mb-3">History</h2>
+        <h2 className="text-lg font-semibold text-neutral-100 mb-1">History</h2>
+        <p className="text-xs text-neutral-500 mb-3">
+          Past signals, plus today&apos;s signals that already fired (a position was opened from them) —
+          those move here so the Today feed only shows setups still actionable.
+        </p>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          {history.map((s) => (
+          {historyWithFired.map((s) => (
             <SignalCard key={s.id} signal={s} locked={s.tier === "premium" && !premiumUnlocked} />
           ))}
         </div>
