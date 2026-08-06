@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { Chart } from "@/components/Chart";
+import { TradingViewChart } from "@/components/TradingViewChart";
 import { RequireAuth } from "@/components/RequireAuth";
 import {
   analyze,
@@ -77,6 +78,9 @@ function ChartsPageInner() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [livePrice, setLivePrice] = useState<LivePrice | null>(null);
   const [news, setNews] = useState<NewsResult | null>(null);
+  // "engine" = our chart with entry/SL/TP + pattern overlays; "tradingview" =
+  // TradingView's embedded live chart (display only — analysis stays ours)
+  const [chartView, setChartView] = useState<"engine" | "tradingview">("engine");
 
   useEffect(() => {
     listSymbols()
@@ -265,21 +269,49 @@ function ChartsPageInner() {
 
       {candles.length > 0 && (
         <div className="bg-neutral-900/60 border border-neutral-800 rounded-xl p-4">
-          {livePrice && (
-            <div className="flex items-baseline gap-2 mb-3">
-              <span className="text-2xl font-bold font-mono text-neutral-100">
-                {livePrice.price.toFixed(livePrice.price > 100 ? 2 : 5)}
-              </span>
-              <span className="text-xs text-neutral-500">{symbol}</span>
-              {livePrice.source === "live" && (
-                <span className="flex items-center gap-1 text-[10px] text-emerald-400 ml-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  live
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+            {livePrice ? (
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-bold font-mono text-neutral-100">
+                  {livePrice.price.toFixed(livePrice.price > 100 ? 2 : 5)}
                 </span>
-              )}
+                <span className="text-xs text-neutral-500">{symbol}</span>
+                {livePrice.source === "live" && (
+                  <span className="flex items-center gap-1 text-[10px] text-emerald-400 ml-1">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    live
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div />
+            )}
+            <div className="flex items-center gap-1 bg-neutral-950/60 border border-neutral-800 rounded-md p-1">
+              <button
+                onClick={() => setChartView("engine")}
+                title="PIP HIVE chart with entry/stop/target and pattern overlays"
+                className={`text-xs font-medium px-3 py-1 rounded ${
+                  chartView === "engine" ? "bg-cyan-500/20 text-cyan-300" : "text-neutral-400 hover:text-neutral-100"
+                }`}
+              >
+                Engine
+              </button>
+              <button
+                onClick={() => setChartView("tradingview")}
+                title="TradingView live chart (display only — analysis below is still the PIP HIVE engine)"
+                className={`text-xs font-medium px-3 py-1 rounded ${
+                  chartView === "tradingview" ? "bg-cyan-500/20 text-cyan-300" : "text-neutral-400 hover:text-neutral-100"
+                }`}
+              >
+                TradingView
+              </button>
             </div>
+          </div>
+          {chartView === "engine" ? (
+            <Chart candles={candles} patterns={report?.patterns ?? []} levels={report?.levels ?? null} livePrice={livePrice} />
+          ) : (
+            <TradingViewChart symbol={symbol} interval={interval} />
           )}
-          <Chart candles={candles} patterns={report?.patterns ?? []} levels={report?.levels ?? null} livePrice={livePrice} />
         </div>
       )}
 
