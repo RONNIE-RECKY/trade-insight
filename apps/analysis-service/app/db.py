@@ -223,6 +223,27 @@ _INDEX_MIGRATIONS = [
 ]
 
 
+# Data fixes that must run EXACTLY once per database (unlike the idempotent
+# DDL above, re-running these would destroy good data). Tracked by name in
+# the applied_fixes table.
+_ONE_TIME_FIXES = [
+    # XAUUSD candles were cached from GC=F (gold futures), which trades ~$50-60
+    # above spot — so stored levels didn't match a trader's spot XAUUSD chart.
+    # yahoo_feed now basis-adjusts onto spot; purge the futures-priced rows once
+    # so the cache rebuilds cleanly instead of mixing the two price scales.
+    ("2026-08-xauusd-spot-rebase", "DELETE FROM candles WHERE symbol = 'XAUUSD'"),
+    # Yahoo's in-progress bar used to be stored at the current clock time
+    # instead of its bar boundary, so every poll appended a flat junk candle.
+    # yahoo_feed now snaps those onto the boundary; drop the accumulated rows
+    # (any non-daily bar whose timestamp isn't on a minute/hour boundary).
+    (
+        "2026-08-drop-unaligned-partial-bars",
+        "DELETE FROM candles WHERE substr(ts, 18, 2) NOT IN ('00', '') OR substr(ts, 15, 2) NOT IN "
+        "('00','05','10','15','20','25','30','35','40','45','50','55')",
+    ),
+]
+
+
 def init_db() -> None:
     with get_conn() as conn:
         conn.executescript(SCHEMA)
@@ -234,6 +255,17 @@ def init_db() -> None:
                 pass  # column already exists
         for ddl in _INDEX_MIGRATIONS:
             conn.execute(ddl)
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS applied_fixes ("
+            "name TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')))"
+        )
+        for name, sql in _ONE_TIME_FIXES:
+            already = conn.execute("SELECT 1 FROM applied_fixes WHERE name = ?", (name,)).fetchone()
+            if already:
+                continue
+            conn.execute(sql)
+            conn.execute("INSERT INTO applied_fixes (name) VALUES (?)", (name,))
 
 
 @contextmanager
