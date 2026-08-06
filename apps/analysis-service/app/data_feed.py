@@ -6,6 +6,7 @@ deltas since the last stored timestamp.
 from __future__ import annotations
 
 import os
+import time
 
 import httpx
 import pandas as pd
@@ -24,6 +25,56 @@ _INTERVAL_MAP = {
     "1day": "1day",
 }
 
+# Twelve Data uses slash-separated pairs ("XAU/USD"), not our concatenated
+# form ("XAUUSD") — passing ours verbatim returns "symbol not found" for every
+# request, so the key silently does nothing while we fall back to Yahoo.
+# Note XAU/USD here is real SPOT gold, which also removes the futures-basis
+# adjustment yahoo_feed has to apply.
+_TD_SYMBOL = {
+    "EURUSD": "EUR/USD",
+    "GBPUSD": "GBP/USD",
+    "USDJPY": "USD/JPY",
+    "USDCHF": "USD/CHF",
+    "AUDUSD": "AUD/USD",
+    "USDCAD": "USD/CAD",
+    "NZDUSD": "NZD/USD",
+    "XAUUSD": "XAU/USD",
+    "BTCUSD": "BTC/USD",
+    "ETHUSD": "ETH/USD",
+}
+
+
+def _td_symbol(symbol: str) -> str:
+    return _TD_SYMBOL.get(symbol, symbol)
+
+
+# Twelve Data's free tier allows 8 requests/minute and 800/day, which a full
+# scan (~90 requests) plus the 5-second price ticker blows through easily.
+# Once it throttles us, retrying on every call just costs a wasted round-trip
+# before the Yahoo fallback — so trip a breaker and skip Twelve Data entirely
+# for a cooldown, then try again.
+_TD_COOLDOWN_SECONDS = 300
+_td_blocked_until = 0.0
+
+
+def _td_available() -> bool:
+    return bool(_api_key()) and time.monotonic() >= _td_blocked_until
+
+
+def _td_trip_breaker(reason: str) -> None:
+    global _td_blocked_until
+    _td_blocked_until = time.monotonic() + _TD_COOLDOWN_SECONDS
+    print(
+        f"[data_feed] Twelve Data unavailable ({reason}) — using Yahoo for the next "
+        f"{_TD_COOLDOWN_SECONDS // 60} min",
+        flush=True,
+    )
+
+
+def _is_rate_limit(message: str) -> bool:
+    m = (message or "").lower()
+    return "limit" in m or "429" in m or "credits" in m
+
 
 def _api_key() -> str | None:
     return os.environ.get("TWELVE_DATA_API_KEY")
@@ -35,7 +86,7 @@ def fetch_live_candles(symbol: str, interval: str = "1day", outputsize: int = 30
         raise RuntimeError("TWELVE_DATA_API_KEY not set")
 
     params = {
-        "symbol": symbol,
+        "symbol": _td_symbol(symbol),
         "interval": _INTERVAL_MAP.get(interval, interval),
         "outputsize": outputsize,
         "apikey": key,
@@ -45,7 +96,10 @@ def fetch_live_candles(symbol: str, interval: str = "1day", outputsize: int = 30
     resp.raise_for_status()
     payload = resp.json()
     if payload.get("status") == "error":
-        raise RuntimeError(f"Twelve Data error: {payload.get('message')}")
+        message = str(payload.get("message"))
+        if _is_rate_limit(message):
+            _td_trip_breaker("rate limit")
+        raise RuntimeError(f"Twelve Data error: {message}")
 
     values = payload.get("values", [])
     candles = []
@@ -69,13 +123,16 @@ def fetch_live_quote(symbol: str) -> dict:
         raise RuntimeError("TWELVE_DATA_API_KEY not set")
     resp = httpx.get(
         "https://api.twelvedata.com/price",
-        params={"symbol": symbol, "apikey": key},
+        params={"symbol": _td_symbol(symbol), "apikey": key},
         timeout=10,
     )
     resp.raise_for_status()
     payload = resp.json()
     if "price" not in payload:
-        raise RuntimeError(f"Twelve Data quote error: {payload.get('message', payload)}")
+        message = str(payload.get("message", payload))
+        if _is_rate_limit(message):
+            _td_trip_breaker("rate limit")
+        raise RuntimeError(f"Twelve Data quote error: {message}")
     import datetime as _dt
 
     return {"price": float(payload["price"]), "ts": _dt.datetime.now(_dt.timezone.utc).isoformat()}
@@ -84,7 +141,7 @@ def fetch_live_quote(symbol: str) -> dict:
 def get_live_price(symbol: str) -> dict:
     """Latest traded price independent of candle granularity (see yahoo_feed.fetch_yahoo_quote
     for why candles alone can be several minutes behind the exact-moment price)."""
-    if _api_key():
+    if _td_available():
         try:
             return {**fetch_live_quote(symbol), "source": "live"}
         except Exception:
@@ -121,7 +178,7 @@ def _fetch_candles(symbol: str, interval: str, count: int) -> tuple[list[dict], 
     Fixtures are the last resort — they generate simulated prices that don't
     match the real market. If we have any previously-cached real data, serve
     that instead and let the live-price ticker keep the last bar current."""
-    if _api_key():
+    if _td_available():
         try:
             return fetch_live_candles(symbol, interval, count), "live"
         except Exception as e:
