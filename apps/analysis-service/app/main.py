@@ -4,6 +4,16 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 
+# Load apps/analysis-service/.env before anything reads os.environ, so local
+# dev picks up API keys from a file instead of shell exports. Hosted
+# environments (Railway etc.) set real env vars, which always win —
+# load_dotenv never overrides an existing variable.
+from pathlib import Path as _Path
+
+from dotenv import load_dotenv as _load_dotenv
+
+_load_dotenv(_Path(__file__).resolve().parents[1] / ".env")
+
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
