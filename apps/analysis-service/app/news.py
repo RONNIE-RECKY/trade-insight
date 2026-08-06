@@ -25,18 +25,40 @@ _NEWS_TTL = 300  # seconds
 FINNHUB_NEWS_URL = "https://finnhub.io/api/v1/news"
 
 _CURRENCY_KEYWORDS = {
-    "USD": ["dollar", "fed", "federal reserve", "us economy", "treasury", "powell"],
+    "USD": ["dollar", "greenback", "fed", "federal reserve", "us economy", "treasury", "powell"],
     "EUR": ["euro", "ecb", "eurozone", "lagarde"],
     "GBP": ["pound", "sterling", "bank of england", "boe"],
     "JPY": ["yen", "boj", "bank of japan"],
     "CHF": ["franc", "snb", "swiss national bank"],
-    "AUD": ["aussie", "rba", "reserve bank of australia"],
-    "CAD": ["loonie", "boc", "bank of canada"],
-    "NZD": ["kiwi", "rbnz"],
+    "AUD": ["aussie", "australian dollar", "rba", "reserve bank of australia"],
+    "CAD": ["loonie", "canadian dollar", "boc", "bank of canada"],
+    "NZD": ["kiwi", "new zealand dollar", "rbnz"],
     "XAU": ["gold", "bullion", "safe haven", "xau"],
     "BTC": ["bitcoin", "btc", "crypto"],
     "ETH": ["ethereum", "ether", "eth"],
 }
+
+# "dollar" alone is ambiguous — an "Aussie dollar rises" headline was matching
+# USD and flipping unrelated pairs' sentiment. Other currencies' dollar phrases
+# are stripped before USD keywords are tested, so only the US dollar counts.
+_FOREIGN_DOLLARS = (
+    "aussie dollar",
+    "australian dollar",
+    "canadian dollar",
+    "new zealand dollar",
+    "nz dollar",
+    "kiwi dollar",
+    "singapore dollar",
+    "hong kong dollar",
+    "taiwan dollar",
+)
+
+
+def _mask_foreign_dollars(text: str) -> str:
+    """Blank out non-US 'dollar' mentions so USD matching can't claim them."""
+    for phrase in _FOREIGN_DOLLARS:
+        text = text.replace(phrase, "")
+    return text
 
 # Sentiment lexicon: price-action words plus the FUNDAMENTALS vocabulary that
 # actually moves FX/gold — central-bank stance (hawkish/dovish, hiking/easing),
@@ -150,8 +172,11 @@ def _fetch_sentiment(symbol: str) -> dict:
     pair_score = 0
     for headline in headlines:
         text = headline.lower()
-        matched_base = any(kw in text for kw in base_keywords)
-        matched_quote = any(kw in text for kw in quote_keywords)
+        # USD matching runs against text with foreign "dollar" phrases removed
+        base_text = _mask_foreign_dollars(text) if currencies and currencies[0] == "USD" else text
+        quote_text = _mask_foreign_dollars(text) if len(currencies) > 1 and currencies[1] == "USD" else text
+        matched_base = any(kw in base_text for kw in base_keywords)
+        matched_quote = any(kw in quote_text for kw in quote_keywords)
         if not matched_base and not matched_quote:
             continue
         gold_side = matched_base and currencies and currencies[0] == "XAU"
