@@ -160,7 +160,7 @@ export function NewsIntel({ userId }: { userId: number | null }) {
       {(data.secondary_intel?.length ?? 0) > 0 && (
         <div className="pt-3 border-t border-neutral-800 space-y-2">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-            Also this week — high impact
+            Also coming up
           </p>
           {data.secondary_intel!.map((s) => (
             <div
@@ -170,8 +170,14 @@ export function NewsIntel({ userId }: { userId: number | null }) {
               <div>
                 <p className="text-sm font-medium text-neutral-100">
                   {s.event.name}
-                  <span className="ml-2 text-[10px] uppercase text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded px-1.5 py-0.5">
-                    high impact
+                  <span
+                    className={`ml-2 text-[10px] uppercase rounded px-1.5 py-0.5 border ${
+                      s.event.impact === "high"
+                        ? "text-rose-300 bg-rose-500/10 border-rose-500/20"
+                        : "text-amber-300 bg-amber-500/10 border-amber-500/20"
+                    }`}
+                  >
+                    {s.event.impact} impact
                   </span>
                 </p>
                 <p className="text-[11px] text-neutral-500">

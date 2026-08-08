@@ -327,17 +327,20 @@ def get_news_intel() -> dict:
 
     intel = generate_event_intel(focus, store=False) if focus else None
 
-    # High-impact events (NFP, CPI, FOMC, Powell) coming up within 7 days that
-    # AREN'T the focus get their own prediction row below the main card — so a
-    # Thursday claims focus never hides Friday's NFP. Reuses the focus
-    # analysis: it's the same current-chart read, recomputing would only
-    # duplicate the numbers and the latency.
+    # Every other gold-moving event in the next 7 days — high impact first
+    # (NFP, CPI, FOMC, Powell), then medium (PPI, retail sales, GDP, claims) —
+    # gets its own prediction row below the main card, so a nearer event never
+    # hides the ones behind it. Reuses the focus analysis: it's the same
+    # current-chart read, recomputing would only duplicate numbers and latency.
     secondary = []
     if intel is not None:
         shared_analysis = None
-        for e in events:
-            if e is focus or e.get("impact") != "high":
-                continue
+        _impact_rank = {"high": 0, "medium": 1}
+        candidates = sorted(
+            (e for e in events if e is not focus),
+            key=lambda e: (_impact_rank.get(e.get("impact"), 2), e["time"]),
+        )
+        for e in candidates:
             et = datetime.fromisoformat(e["time"])
             if not (0 <= (et - now).total_seconds() <= 7 * 86400):
                 continue
@@ -357,7 +360,7 @@ def get_news_intel() -> dict:
                     "commentary": intel.get("commentary"),
                 }
             secondary.append(generate_event_intel(e, store=False, analysis=shared_analysis))
-            if len(secondary) >= 2:
+            if len(secondary) >= 4:
                 break
 
     return {
